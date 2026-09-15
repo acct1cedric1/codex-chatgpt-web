@@ -354,7 +354,7 @@ test("a completed retained agent returns an exact checkpoint and its browser is 
   expect(transactionTtl).toBe(MAX_COMPACTION_HANDOFF_TIMEOUT_MS);
 });
 
-test("completed retained compaction never treats ordinary assistant text as a handoff", async () => {
+test("completed retained compaction fails promptly when the checkpoint is missing", async () => {
   const sourceRequest = request(false);
   const source = new ChatGptTurnSession({
     mode: "read-only",
@@ -371,7 +371,7 @@ test("completed retained compaction never treats ordinary assistant text as a ha
       token: "control_11111111111111111111111111111111",
       handoffId: "handoff_22222222222222222222222222222222",
     }),
-    waitForCompactionHandoff: async () => { throw new Error("structured handoff missing"); },
+    waitForCompactionHandoff: async () => new Promise<string>(() => {}),
     abortCompactionTransaction() {},
   } as unknown as TurnBroker;
   const worker = {
@@ -385,7 +385,13 @@ test("completed retained compaction never treats ordinary assistant text as a ha
     broker,
     { localToolsEnabled: true, solAvailable: true, proAvailable: true },
     "trace_no_text_fallback",
-  )).rejects.toThrow("structured handoff missing");
+    undefined,
+    25,
+  )).rejects.toMatchObject({
+    code: "compaction_handoff_missing",
+    retryable: false,
+    message: "ChatGPT finished without submitting the context checkpoint. Check the ChatGPT tab for the reason before retrying.",
+  });
 });
 
 test("retained compaction deadline bounds browser settlement after the control handoff succeeds", async () => {
@@ -1313,6 +1319,42 @@ test("fresh multipart compaction gives each acknowledged phase its own handoff b
   }
 });
 
+test.each([[6, true], [30, false]] as const)("Pro compaction after %i minutes has completion=%s", async (minutes, completed) => {
+  const root = mkdtempSync(join(shortSocketTempRoot(), "cgw-pro-compact-"));
+  const provider: CodexProviderConfig = {
+    adapter: "chatgpt-web", baseUrl: `browser://pro-compact-${Date.now()}`,
+    chatgptWeb: {
+      browserHost: "launcher", browserHostDescriptorPath: join(root, "launcher.json"),
+      brokerSocketPath: defaultBrokerEndpoint(root), localToolsEnabled: true,
+      solAvailable: true, proAvailable: true,
+    },
+  };
+  const worker = ChatGptBrowserWorker.forProvider(provider);
+  const originalRun = worker.run.bind(worker);
+  worker.run = async turn => {
+    turn.onSubmitted?.();
+    mock.timers.tick(minutes * 60_000);
+    if (completed) expect(turn.abortSignal?.aborted).toBeFalse();
+    return "Pro checkpoint after sustained generation";
+  };
+  const compact = request(true);
+  compact.options.reasoning = "max";
+  const events: AdapterEvent[] = [];
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    await createChatGptWebAdapter(provider).runTurn!(compact, { headers: new Headers() }, event => events.push(event));
+    expect(events.at(-1)).toMatchObject(completed
+      ? { type: "done", stopReason: "stop", endTurn: true }
+      : { type: "error", message: "ChatGPT compaction did not fully settle within 1800000ms", retryable: false });
+    expect(events.some(event => event.type === "text_delta" && event.text.includes("Pro checkpoint"))).toBe(completed);
+  } finally {
+    mock.timers.reset();
+    worker.run = originalRun;
+    await TurnBroker.forSocket(provider.chatgptWeb!.brokerSocketPath!).close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("cancel-all waits for physical settlement of a fresh compaction fallback", async () => {
   const root = mkdtempSync(join(shortSocketTempRoot(), "cgw-cancel-fresh-compaction-"));
   const provider: CodexProviderConfig = {
@@ -1553,7 +1595,7 @@ test("a disappeared retained source cannot leave its fresh compaction rebuild pa
       type: "error",
       code: "compaction_handoff_failed",
       retryable: false,
-      message: "ChatGPT did not complete the context handoff. Retry the task.",
+      message: "ChatGPT compaction did not fully settle within 25ms",
     });
   } finally {
     releaseBrowser?.();

@@ -770,10 +770,12 @@ export class ChatGptTurnSessions {
     return { cancelled: matches.length, settlement };
   }
 
-  cancelledError(traceId: string): Error | undefined {
+  terminalError(traceId: string, roundKey?: string): Error | undefined {
     for (const session of this.entries.values()) {
       if (session.traceId !== traceId) continue;
       if (session.supersededError) return session.supersededError;
+      const failure = roundKey === undefined ? undefined : session.roundFailure(roundKey);
+      if (failure && "retryable" in failure && failure.retryable === false) return failure;
       const outcome = session.settledOutcome();
       if (outcome?.type !== "error") continue;
       if ("code" in outcome.error && outcome.error.code === "client_cancelled") return outcome.error;

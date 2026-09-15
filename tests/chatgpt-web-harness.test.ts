@@ -940,7 +940,7 @@ describe("ChatGPT outer-native harness v4", () => {
       "new-trace", undefined, "native-turn", "native-thread", chatGptInstructionLineage(steered));
     expect(cancellations).toHaveLength(1);
     expect(starts).toBe(0);
-    expect(sessions.cancelledError("old-trace")).toMatchObject({ code: "client_cancelled" });
+    expect(sessions.terminalError("old-trace")).toMatchObject({ code: "client_cancelled" });
     cleanup();
     const current = await next;
     expect(starts).toBe(1);
@@ -1270,14 +1270,16 @@ describe("ChatGPT outer-native harness v4", () => {
     const provider: CodexProviderConfig = {
       adapter: "chatgpt-web",
       baseUrl: `browser://chatgpt-retry-budget-${Date.now()}`,
-      chatgptWeb: { brokerSocketPath: socketPath, localToolsEnabled: false, solAvailable: true, proAvailable: true },
+      chatgptWeb: {
+        brokerSocketPath: socketPath, localToolsEnabled: false, solAvailable: true, proAvailable: true,
+        threadEnvironmentStatePath: join(tempRoot, "unsubmitted-retry", "environment.json"),
+      },
     };
     const worker = ChatGptBrowserWorker.forProvider(provider);
     const originalRun = worker.run.bind(worker);
     let browserStarts = 0;
     (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = async turn => {
       browserStarts += 1;
-      turn.onSendActivated?.();
       throw new ChatGptWebAdapterError("ChatGPT rate limit: too many requests. Try again in a few minutes.", {
         status: 429,
         errorType: "rate_limit_error",
@@ -1305,6 +1307,44 @@ describe("ChatGPT outer-native harness v4", () => {
       expect(browserStarts).toBe(MAX_CHATGPT_WEB_TURN_RETRIES + 1);
     } finally {
       (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = originalRun;
+      await TurnBroker.forSocket(socketPath).close();
+    }
+  });
+
+  test("a submitted upstream failure keeps its original error across native reconnects with durable receipts", async () => {
+    const socketPath = brokerTestEndpoint(`cgw-submitted-receipt-${process.pid}-${Date.now()}`);
+    const provider: CodexProviderConfig = {
+      adapter: "chatgpt-web", baseUrl: `browser://submitted-receipt-${Date.now()}`,
+      chatgptWeb: {
+        brokerSocketPath: socketPath, localToolsEnabled: false, solAvailable: true, proAvailable: true,
+        threadEnvironmentStatePath: join(tempRoot, "submitted-receipt", "environment.json"),
+      },
+    };
+    const worker = ChatGptBrowserWorker.forProvider(provider);
+    const originalRun = worker.run.bind(worker);
+    let starts = 0;
+    worker.run = async turn => {
+      starts++;
+      turn.onSendActivated?.();
+      turn.onSubmitted?.();
+      throw new ChatGptWebAdapterError("ChatGPT response failed upstream", {
+        status: 502, errorType: "server_error", code: "upstream_server_error", retryable: true,
+      });
+    };
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const events: AdapterEvent[] = [];
+        await createChatGptWebAdapter(provider).runTurn!(
+          rawWireRequest(environmentXml), { headers: new Headers() }, event => events.push(event),
+        );
+        expect(events.at(-1)).toMatchObject({
+          type: "error", message: "ChatGPT response failed upstream",
+          code: "upstream_server_error", retryable: false,
+        });
+      }
+      expect(starts).toBe(1);
+    } finally {
+      worker.run = originalRun;
       await TurnBroker.forSocket(socketPath).close();
     }
   });
@@ -2302,6 +2342,7 @@ describe("ChatGPT outer-native harness v4", () => {
       adapter: "chatgpt-web",
       baseUrl: `browser://chatgpt-active-compact-${Date.now()}`,
       chatgptWeb: {
+        threadEnvironmentStatePath: join(tempRoot, "compaction-receipts", "environment.json"),
         browserHost: "launcher",
         browserHostDescriptorPath: join(tempRoot, "active-compact-launcher.json"),
         brokerSocketPath: socketPath,
@@ -2453,6 +2494,10 @@ describe("ChatGPT outer-native harness v4", () => {
       expect(originalBrowserReceivedToolResult).toBe(true);
       expect(retainedCompactionMessages).toBe(1);
       expect(browserStarts).toBe(2);
+
+      const receipt = JSON.parse(readFileSync(join(tempRoot, "compaction-receipts", "task-records.json"), "utf8")).records[0];
+      expect(receipt.state).toBe("answer_returned");
+      expect(receipt.tools).toEqual([{ id: callStart!.id, name: "exec_command", state: "returned", exitCode: 0 }]);
 
       const compactReplayEvents: AdapterEvent[] = [];
       await adapter.runTurn!(

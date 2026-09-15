@@ -126,6 +126,18 @@ export class TaskRecords {
     this.save(); // Commit before emitting any tool call to native Codex.
   }
 
+  discardUnsubmitted(traceId: string): void {
+    if (!this.path) return;
+    const record = this.require(traceId);
+    if (record.state !== "needs_review" || record.totalCalls !== 0) {
+      throw new Error("COS cannot retry a turn with possible tool effects");
+    }
+    // Only the live submission owner can prove Send never activated. Restart recovery and
+    // submitted failures must retain their receipts and continue to reject duplicate execution.
+    this.records.splice(this.records.indexOf(record), 1);
+    this.save();
+  }
+
   complete(traceId: string, callId: string, result: BrokerToolResult): void {
     if (!this.path) return;
     const record = this.require(traceId);

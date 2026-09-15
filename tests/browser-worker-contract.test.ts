@@ -16,6 +16,8 @@ import { compileChatGptWebPrompt, formatChatGptWebMultipartCommit, formatChatGpt
 import { estimateCompiledChatGptWebInputTokens } from "../src/adapters/chatgpt-web/input-tokens";
 import { estimateTokens } from "../src/lib/token-estimate";
 import { chatGptHtmlToMarkdown } from "../src/adapters/chatgpt-web/markdown";
+import type { BrowserTurn } from "../src/adapters/chatgpt-web/browser-worker";
+import { resolveChatGptWebModelMode } from "../src/adapters/chatgpt-web/model";
 
 function personalizedTemporaryChatRole(
   _role: string,
@@ -2107,6 +2109,58 @@ test("consecutive tool turns select the connector again after ChatGPT clears its
   worker.selectConnector = async () => { throw new Error("connector unavailable"); };
   await expect(attach.call(worker, {}, "must not send", true)).rejects.toThrow("connector unavailable");
   expect(inserted).toHaveLength(2);
+});
+
+test("a retained control handoff attaches its connector before preparing submission", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cgw-handoff-connector-"));
+  const page = { evaluate: async () => ({}), isClosed: () => false } as unknown as Page;
+  const preparedForSend = new Error("handoff prepared for send");
+  let selected = false;
+  let selections = 0;
+  let insertions = 0;
+  let fileAttachments = 0;
+  const worker = Object.assign(Object.create(ChatGptBrowserWorker.prototype), {
+    config: { appName: CHATGPT_CONNECTOR_NAME, browserDiagnosticsPath: root },
+    runStage: async (_trace: string, _stage: string, _timeout: number, action: (signal: AbortSignal) => Promise<unknown>) => action(new AbortController().signal),
+    selectModelAndEffort: async (_page: Page, model: string, effort: string, capabilities: Parameters<typeof resolveChatGptWebModelMode>[2]) => resolveChatGptWebModelMode(model, effort, capabilities),
+    captureSubmissionBaseline: async () => ({}),
+    selectConnector: async () => {
+      selected = true;
+      selections++;
+      return { focus: async () => {}, press: async () => {} };
+    },
+    // The empty editor exists on a retained page after the source message consumed its pill.
+    activeComposer: async () => ({ fill: async () => {}, focus: async () => {} }),
+    insertPromptText: async () => { insertions++; expect(selected).toBeTrue(); },
+    assertPromptAttached: async () => {},
+    clearChatGptComposerState: async () => { selected = false; },
+    attachFiles: async () => { fileAttachments++; throw preparedForSend; },
+  }) as { runBrowserTurn(turn: BrowserTurn, surfaceId?: string, page?: Page, reuse?: boolean): Promise<string>; selectConnector: () => Promise<unknown> };
+  const prepare = async () => ({ text: "Submit the pending checkpoint.", images: [], release() {} });
+  const turn: BrowserTurn = {
+    traceId: "retained_control_connector",
+    modelId: CHATGPT_WEB_MODEL_ID,
+    reasoning: "max",
+    capabilities: { localToolsEnabled: false, solAvailable: true, proAvailable: true },
+    nativeConnector: true,
+    requireRetainedConversation: true,
+    prepare,
+    prepareResume: prepare,
+    onTextDelta() {},
+  };
+  try {
+    await expect(worker.runBrowserTurn(turn, undefined, page, true)).rejects.toBe(preparedForSend);
+    expect(selections).toBe(1);
+    expect(insertions).toBe(1);
+    expect(fileAttachments).toBe(1);
+    selected = false;
+    worker.selectConnector = async () => { throw new Error("connector unavailable"); };
+    await expect(worker.runBrowserTurn(turn, undefined, page, true)).rejects.toThrow("connector unavailable");
+    expect(insertions).toBe(1);
+    expect(fileAttachments).toBe(1);
+  } finally {
+    rmSync(root, { recursive: true });
+  }
 });
 
 test("image attachment readiness uses exact file tiles and not localized remove-button text", async () => {

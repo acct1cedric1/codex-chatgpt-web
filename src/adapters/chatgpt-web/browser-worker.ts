@@ -3259,8 +3259,8 @@ export class ChatGptBrowserWorker {
         await this.assertPromptAttached(page, prompt, abortSignal);
         return;
       }
-      // Ordinary tool turns start on a fresh document. Prove the connector attachment
-      // before inserting any task context; a missing pill must never imply availability.
+      // Prove the connector attachment for this message, including retained control handoffs.
+      // ChatGPT consumes the selected pill on send; chat reuse does not preserve tool availability.
       const selectedComposer = await this.selectConnector(
         page,
         captureDiagnostic,
@@ -4627,11 +4627,9 @@ export class ChatGptBrowserWorker {
       }
 
       let submissionBaseline = await this.captureSubmissionBaseline(page);
-      // An explicit retained compaction handoff has only a one-shot control capability.
-      // Its connector was bound on the source turn; the retained page cannot select it again.
-      const retainedControlHandoff = reuseConversation && turn.requireRetainedConversation
-        && turn.nativeConnector && !turn.capabilities.localToolsEnabled;
-      const attachConnector = mode.localTools && !retainedControlHandoff;
+      // Connector selection belongs to the message, not the retained conversation. A control
+      // handoff still needs the connector; its one-shot token limits it to checkpoint submission.
+      const attachConnector = mode.localTools;
       let catalogRefreshAvailable = attachConnector && !reuseConversation && !prepared.multipart;
       const connectorAttemptBudget: ChatGptConnectorAttemptBudget = { triggerAttempts: 0 };
       for (;;) {

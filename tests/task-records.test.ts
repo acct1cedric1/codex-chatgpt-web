@@ -25,6 +25,7 @@ test("task receipts survive restart, isolate tasks and fence uncertain replay", 
     expect(readFileSync(path, "utf8")).not.toContain("PRIVATE PATCH CONTENT");
     expect(() => restarted.begin("trace_first", "thread_first", "turn_first", "chatgpt-web/high"))
       .toThrow("must not run again automatically");
+    expect(() => restarted.discardUnsubmitted("trace_first")).toThrow("possible tool effects");
     restarted.begin("trace_recovery", "thread_first", "turn_recovery", "chatgpt-web/high");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

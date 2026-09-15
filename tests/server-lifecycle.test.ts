@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chatGptWebTraceId } from "../src/adapters/chatgpt-web";
 import { runStructuredCompactionOnce } from "../src/adapters/chatgpt-web/compaction-handoff";
-import { ChatGptTextFeed, ChatGptTraceFeed, chatGptTurnSessions } from "../src/adapters/chatgpt-web/turn-execution";
+import { ChatGptTextFeed, ChatGptTraceFeed, chatGptTurnRoundKey, chatGptTurnSessions } from "../src/adapters/chatgpt-web/turn-execution";
+import { ChatGptWebAdapterError } from "../src/adapters/chatgpt-web/adapter-error";
 import { callTurnBroker, closeTurnBrokers, RemoteTurnBroker, TurnBroker } from "../src/adapters/chatgpt-web/turn-broker";
 import { defaultBrokerEndpoint, defaultConfig, providerConfig } from "../src/config";
 import { parseRequest } from "../src/responses/parser";
@@ -852,7 +853,7 @@ test("authenticated cancel-all aborts fresh structured compaction work", async (
   }
 });
 
-test("a Codex retry after tab cancellation receives terminal HTTP 400 without a new browser", async () => {
+test.each(["client_cancelled", "upstream_server_error"] as const)("a Codex retry after %s receives terminal HTTP 400 without a new browser", async code => {
   const config = defaultConfig("browser-only");
   const turnId = "turn_cancelled_replay";
   const body = {
@@ -877,7 +878,7 @@ test("a Codex retry after tab cancellation receives terminal HTTP 400 without a 
   let rejectBrowser!: (error: Error) => void;
   chatGptTurnSessions.clear();
   const cancelledBrowser = new Promise<string>((_resolve, reject) => { rejectBrowser = reject; });
-  chatGptTurnSessions.getOrCreate("cancelled-replay", () => ({
+  const session = chatGptTurnSessions.getOrCreate("cancelled-replay", () => ({
     mode: "read-only",
     browser: cancelledBrowser,
     physicalSettlement: cancelledBrowser.then(() => undefined, () => undefined),
@@ -887,8 +888,18 @@ test("a Codex retry after tab cancellation receives terminal HTTP 400 without a 
   }), traceId);
 
   try {
-    expect(await chatGptTurnSessions.cancelTrace(traceId)).toBe(1);
-    expect(chatGptTurnSessions.cancelledError(traceId)?.message).toContain("Codex turn was cancelled");
+    const message = code === "client_cancelled"
+      ? "The ChatGPT browser tab was closed, so the Codex turn was cancelled."
+      : "ChatGPT reported a response error before completing the task. Check the ChatGPT tab and retry.";
+    const errorType = code === "client_cancelled" ? "client_closed_request" : "server_error";
+    if (code === "client_cancelled") {
+      expect(await chatGptTurnSessions.cancelTrace(traceId)).toBe(1);
+    } else {
+      const original = new ChatGptWebAdapterError(message, { status: 502, errorType, code, retryable: true });
+      session.failRound(chatGptTurnRoundKey(parsed), new ChatGptWebAdapterError(message, { status: 502, errorType, code, retryable: false, cause: original }));
+      rejectBrowser(original);
+      await session.physicalSettlement;
+    }
     let adapterConstructions = 0;
     const response = await responseRequest(new Request("http://127.0.0.1:17841/v1/responses", {
       method: "POST",
@@ -896,15 +907,15 @@ test("a Codex retry after tab cancellation receives terminal HTTP 400 without a 
       body: JSON.stringify(body),
     }), config, () => {
       adapterConstructions += 1;
-      throw new Error("cancelled turn must not construct a new browser adapter");
+      throw new Error("terminal turn must not construct a new browser adapter");
     });
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({
       error: {
-        type: "client_closed_request",
-        code: "client_cancelled",
-        message: "The ChatGPT browser tab was closed, so the Codex turn was cancelled.",
+        type: errorType,
+        code,
+        message,
       },
     });
     expect(adapterConstructions).toBe(0);

@@ -53,3 +53,32 @@ test("tool receipts preserve explicit errors and never call a returned result su
     expect(readFileSync(path, "utf8")).not.toContain("PRIVATE OUTPUT");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("native text receipts preserve exit codes without interpreting command output as a receipt", () => {
+  const root = mkdtempSync(join(tmpdir(), "cos-task-text-outcome-"));
+  const path = join(root, "records.json");
+  try {
+    const records = new TaskRecords(path);
+    records.begin("trace_text", "thread_text", "turn_text", "chatgpt-web/pro");
+    const failed = "Chunk ID: abc123\nWall time: 0.12 seconds\nProcess exited with code 1\nOutput:\nPRIVATE OUTPUT";
+    const returned = "Exit code: 0\nWall time: 0 seconds\nOutput:\nPRIVATE PATCH OUTPUT";
+    records.dispatch("trace_text", [
+      { callId: "call_command", wireName: "functions__exec_command", freeform: false },
+      { callId: "call_patch", wireName: "apply_patch", freeform: true },
+      { callId: "call_running", wireName: "write_stdin", freeform: false },
+      { callId: "call_other", wireName: "read", freeform: false },
+    ]);
+    records.complete("trace_text", "call_command", { content: [{ type: "text", text: failed }] });
+    records.complete("trace_text", "call_patch", { content: [{ type: "text", text: returned }] });
+    records.complete("trace_text", "call_running", {
+      content: [{ type: "text", text: `Chunk ID: abc123\nWall time: 10 seconds\nProcess running with session ID 97555\nOutput:\n${failed}` }],
+    });
+    records.complete("trace_text", "call_other", { content: [{ type: "text", text: failed }] });
+    records.complete("trace_text", "call_command", { content: [{ type: "text", text: failed }] });
+    const saved = readFileSync(path, "utf8");
+    const record = JSON.parse(saved).records[0];
+    expect(record.tools.map((tool: { exitCode: number | null }) => tool.exitCode)).toEqual([1, 0, null, null]);
+    expect(record.errors).toBe(1);
+    expect(saved).not.toContain("PRIVATE");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

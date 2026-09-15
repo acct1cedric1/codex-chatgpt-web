@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createContext, runInContext } from "node:vm";
 import type { Page } from "playwright-core";
-import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_COMPOSER_SELECT_ALL_KEY, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptPromptAttachmentIntegrityError, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, chatGptConnectorAttachmentMode, chatGptNewTurnIdentity, chatGptReboundTurnIdentity, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, dismissChatGptTemporaryChatOnboarding, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, resolveChatGptWebMultipartStagingMode, sanitizeChatGptBrowserDiagnosticState, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
+import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_COMPOSER_SELECT_ALL_KEY, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptPromptAttachmentIntegrityError, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, chatGptNewTurnIdentity, chatGptSubmissionResponseIdentity, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, dismissChatGptTemporaryChatOnboarding, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, resolveChatGptWebMultipartStagingMode, sanitizeChatGptBrowserDiagnosticState, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
 import { ensureChatGptPersonalizedConnectorAccess } from "../src/adapters/chatgpt-web/browser-worker";
 import { chatGptStoppedThinkingError } from "../src/adapters/chatgpt-web/adapter-error";
 import { CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
@@ -107,29 +107,50 @@ test("submission DOM tracks logical identities and retains virtualized history i
   await expect(worker.submissionDomState(page, baseline.domCache)).rejects.toThrow("duplicate");
 });
 
-test("assistant tracking rebinds only one proven replacement after React detaches its node", () => {
-  expect(chatGptReboundTurnIdentity(
-    ["conversation-turn-1"],
-    "conversation-turn-2",
-    ["conversation-turn-1", "conversation-turn-2"],
-  )).toBe("conversation-turn-2");
-  expect(chatGptReboundTurnIdentity(
-    ["conversation-turn-1"],
-    "conversation-turn-2",
-    ["conversation-turn-1", "conversation-turn-3"],
-  )).toBe("conversation-turn-3");
-  expect(() => chatGptReboundTurnIdentity(
-    ["conversation-turn-1"],
-    "conversation-turn-2",
-    ["conversation-turn-1", "conversation-turn-3", "conversation-turn-4"],
-  )).toThrow("2 new conversation turns");
+test("assistant tracking excludes a remounted staging acknowledgement from the current response", async () => {
+  const baseline = { initialTurnIdentities: ["stage-user", "stage-ack"], domCache: {} };
+  const before = {
+    turnIdentities: ["stage-user", "stage-ack", "submitted-user", "answer"],
+    userIdentities: ["stage-user", "submitted-user"],
+    responseIdentities: ["stage-ack", "answer"],
+  };
+  expect(chatGptSubmissionResponseIdentity(baseline, before)).toBe("answer");
+  const after = {
+    turnIdentities: ["stage-user", "stage-ack-remounted", "submitted-user", "answer-remounted"],
+    // The exact submitted user's outer container survives virtualization of its section.
+    userIdentities: ["stage-user"],
+    responseIdentities: ["stage-ack-remounted", "answer-remounted"],
+  };
+  const replacement = { id: "answer-remounted" };
+  const page = { locator: (selector: string) => {
+    expect(selector).toBe('[data-turn-id="answer-remounted"]');
+    return replacement;
+  } } as unknown as Page;
+  const worker = Object.assign(Object.create(ChatGptBrowserWorker.prototype), {
+    submissionDomState: async () => after,
+  });
+  const binding = { identity: "answer", locator: { count: async () => 0 }, acceptedTurnIdentities: before.turnIdentities };
+  await expect(worker.reconcileAssistantTurnBinding(page, baseline, binding)).resolves.toMatchObject({
+    identity: "answer-remounted", locator: replacement,
+  });
 });
 
-test("a retained MCP conversation reuses its proven connector binding", () => {
-  expect(chatGptConnectorAttachmentMode(true, false)).toBe("mention");
-  expect(chatGptConnectorAttachmentMode(true, true)).toBe("retained");
-  expect(chatGptConnectorAttachmentMode(false, false)).toBe("none");
+test("response ownership still rejects multiple candidates and a different user turn", () => {
+  const baseline = { initialTurnIdentities: [], submittedUserIdentity: "submitted-user" };
+  expect(() => chatGptSubmissionResponseIdentity(baseline, {
+    turnIdentities: ["submitted-user", "answer-one", "answer-two"],
+    userIdentities: ["submitted-user"], responseIdentities: ["answer-one", "answer-two"],
+  })).toThrow("2 new conversation turns");
+  expect(() => chatGptSubmissionResponseIdentity(baseline, {
+    turnIdentities: ["submitted-user", "different-user", "different-answer"],
+    userIdentities: ["submitted-user", "different-user"], responseIdentities: ["different-answer"],
+  })).toThrow("another user turn");
+  expect(chatGptSubmissionResponseIdentity(baseline, {
+    turnIdentities: ["unowned-answer"], userIdentities: [], responseIdentities: ["unowned-answer"],
+  })).toBeUndefined();
 });
+
+
 
 test("browser turns run concurrently up to the five-tab limit", async () => {
   expect(MAX_CHATGPT_BROWSER_TABS).toBe(5);
@@ -2061,32 +2082,31 @@ test("an abort while inserting a connector prompt clears the selected pill and p
   expect(connectorSelected).toBeFalse();
 });
 
-test("retained tool turns insert into the connector-bound composer without selecting it again", async () => {
-  const attachPrompt = (ChatGptBrowserWorker.prototype as unknown as {
-    attachPrompt(
-      page: unknown,
-      prompt: string,
-      localTools: boolean,
-      captureDiagnostic?: (checkpoint: string) => Promise<void>,
-      abortSignal?: AbortSignal,
-      catalogRefreshAvailable?: boolean,
-      connectorAttemptBudget?: unknown,
-      reuseConnector?: boolean,
-    ): Promise<void>;
+test("consecutive tool turns select the connector again after ChatGPT clears its pill", async () => {
+  const attach = (ChatGptBrowserWorker.prototype as unknown as {
+    attachPrompt: (...args: unknown[]) => Promise<void>;
   }).attachPrompt;
-
-  const calls: string[] = [];
-  const composer = {
-    fill: async (value: string) => { expect(value).toBe(""); calls.push("fill"); },
-    focus: async () => { calls.push("focus"); },
+  let selected = false;
+  let selections = 0;
+  const inserted: string[] = [];
+  const composer = { focus: async () => {}, press: async () => {} };
+  const worker = {
+    selectConnector: async () => { selected = true; selections++; return composer; },
+    insertPromptText: async (_page: unknown, text: string) => {
+      expect(selected).toBeTrue();
+      inserted.push(text);
+    },
+    assertPromptAttached: async () => {},
   };
-  await attachPrompt.call({
-    activeComposer: async () => composer,
-    selectConnector: async () => { throw new Error("retained connector must not be selected again"); },
-    insertPromptText: async (_page: unknown, text: string) => { expect(text).toBe("retained context"); calls.push("insert"); },
-    assertPromptAttached: async () => { calls.push("assert"); },
-  }, {}, "retained context", true, undefined, undefined, false, undefined, true);
-  expect(calls).toEqual(["fill", "focus", "insert", "assert"]);
+  await attach.call(worker, {}, "first task", true);
+  selected = false; // Observed ChatGPT state after the first message was sent.
+  await attach.call(worker, {}, "follow-up task", true);
+  expect(selections).toBe(2);
+  expect(inserted).toEqual([" first task", " follow-up task"]);
+  selected = false;
+  worker.selectConnector = async () => { throw new Error("connector unavailable"); };
+  await expect(attach.call(worker, {}, "must not send", true)).rejects.toThrow("connector unavailable");
+  expect(inserted).toHaveLength(2);
 });
 
 test("image attachment readiness uses exact file tiles and not localized remove-button text", async () => {
@@ -2268,7 +2288,7 @@ test("Think slash requires one command and verifies a newly exposed control", as
   expect(unavailable.state.enters).toBe(0);
 });
 
-test("Think attachment runs after fresh connector selection and rechecks retained and Browser-only turns", async () => {
+test("Think attachment follows connector selection on initial and follow-up tool turns", async () => {
   const attach = (ChatGptBrowserWorker.prototype as unknown as { attachPrompt: (...args: unknown[]) => Promise<void> }).attachPrompt;
   for (const [localTools, retained] of [[true, false], [true, true], [false, false]]) {
     const ui = thinkSlashFixture();
@@ -2280,16 +2300,16 @@ test("Think attachment runs after fresh connector selection and rechecks retaine
       insertPromptText: async () => { submitted.push(ui.state.pressed); },
       assertPromptAttached: async () => {}, clearChatGptComposerState: async () => { ui.state.draft = ""; ui.state.connectors = []; },
     };
-    await attach.call(worker, ui.page, "requested task", localTools, undefined, undefined, false, undefined, retained, true);
+    await attach.call(worker, ui.page, "requested task", localTools, undefined, undefined, false, undefined, true);
     expect(submitted).toEqual([true]);
-    expect(connectorSelections).toBe(localTools && !retained ? 1 : 0);
-    if (localTools && !retained) expect(ui.state.connectors).toEqual(["Codex Native2"]);
+    expect(connectorSelections).toBe(localTools ? 1 : 0);
+    if (localTools) expect(ui.state.connectors).toEqual(["Codex Native2"]);
     if (retained) {
       ui.state.pressed = false;
-      await attach.call(worker, ui.page, "follow-up task", localTools, undefined, undefined, false, undefined, retained, true);
+      await attach.call(worker, ui.page, "follow-up task", localTools, undefined, undefined, false, undefined, true);
       expect(submitted).toEqual([true, true]);
       expect(ui.state.commands).toEqual(["/think", "/think"]);
-      expect(connectorSelections).toBe(0);
+      expect(connectorSelections).toBe(2);
     }
   }
 });
@@ -2305,7 +2325,7 @@ test("Think attachment rolls back a lost connector and never inserts the prompt"
     clearChatGptComposerState: async () => { cleanup += 1; ui.state.draft = ""; ui.state.connectors = []; },
   };
   const attach = (ChatGptBrowserWorker.prototype as unknown as { attachPrompt: (...args: unknown[]) => Promise<void> }).attachPrompt;
-  await expect(attach.call(worker, ui.page, "must not be inserted", true, undefined, undefined, false, undefined, false, true))
+  await expect(attach.call(worker, ui.page, "must not be inserted", true, undefined, undefined, false, undefined, true))
     .rejects.toThrow("selected connectors");
   expect(insertions).toBe(0);
   expect(cleanup).toBe(1);

@@ -6,7 +6,7 @@ COS Workbench is our Windows desktop fork of codex-chatgpt-web. It connects a si
 
 Version 5.1 adds cumulative checkpoint retention, durable tool receipts, restart review, a Windows broker fix, and direct setup without a social-link gate. The app uses its own data directory and icon. Codex still owns execution, approvals and terminal sessions.
 
-The 5.1.1 update saves the browser session before confirming sign-in, shows installation separately from model-list verification, and explains how to retry a settings change when a Codex turn is active. The Windows install has passed sign-in, live browser, native model-list, Bigger Context, and same-version restart checks. MCP account setup is still required for local tools through ChatGPT.
+Version 5.1.4 binds each response to its submitted user message, so an older staging reply that changes its DOM identity does not break current-response tracking. Ambiguous response errors keep their actual reason in Codex. Normal Full-mode turns open a fresh tool-enabled chat with the complete native context. Explicit compaction handoffs still use their source chat. Native text exit codes and final-verification instructions remain in place. See [fork status](docs/fork-status.md) for validation and limits.
 
 This is an unofficial integration. It needs your own ChatGPT sign-in and available account features. Browser changes and service limits still apply. It does not bypass approvals or service refusals. A returned tool result does not prove a task succeeded.
 
@@ -37,7 +37,7 @@ Keep COS Workbench open. In Codex, select a **ChatGPT Web** model and start a no
 
 The current installation routes normal OpenAI models through Workbench as well. Exiting Workbench can interrupt those models until the direct Codex route is restored. The separate legacy Chat On Steroids app is needed only for its own connectors and recording features.
 
-Never commit tunnel IDs, runtime keys, browser sessions, or local configuration. MCP setup and connector discovery have been verified on Windows; a full native tool task remains a separate acceptance check.
+Never commit tunnel IDs, runtime keys, browser sessions, or local configuration. MCP setup, connector discovery, and a Full-mode Pro two-turn native tool check have been verified on Windows 5.1.3. Desktop control and other optional tools remain account- and task-dependent.
 
 ## Task recovery
 

@@ -137,7 +137,17 @@ export class TaskRecords {
       && !Array.isArray(result.structuredContent)
       ? result.structuredContent as Record<string, unknown>
       : undefined;
-    const code = structured?.exit_code ?? structured?.exitCode;
+    let code = structured?.exit_code ?? structured?.exitCode;
+    const nativeName = tool.name.split(/__|[./]/).at(-1);
+    if (code === undefined && ["exec_command", "write_stdin", "shell_command", "apply_patch"].includes(nativeName ?? "")) {
+      // Native Codex also returns these transport headers as plain text. Read only the
+      // anchored header of its first text block; stdout may contain arbitrary fake receipts.
+      const first = result.content[0] as { type?: unknown; text?: unknown } | undefined;
+      const header = first?.type === "text" && typeof first.text === "string" ? first.text.slice(0, 1024) : "";
+      const match = header.match(/^Chunk ID: [\w-]+\r?\nWall time: [\d.]+ seconds\r?\nProcess exited with code (-?\d+)\r?\n/)
+        ?? header.match(/^Exit code: (-?\d+)\r?\nWall time: [\d.]+ seconds\r?\nOutput:/);
+      if (match) code = Number(match[1]);
+    }
     const exitCode = typeof code === "number" && Number.isSafeInteger(code) ? code : null;
     const state = result.isError === true || (exitCode !== null && exitCode !== 0) ? "error" : "returned";
     // An HTTP reconnect can redeliver a result whose broker acknowledgement was lost.

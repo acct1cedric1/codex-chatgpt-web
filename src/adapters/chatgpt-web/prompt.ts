@@ -498,9 +498,13 @@ export function compileChatGptWebPrompt(
       "For local work required by the task, use the attached Codex Native tools directly according to their declared descriptions and schemas.",
       "Call a Codex Native tool only when the latest active request requires a local effect or fresh local evidence that is not already present in the supplied context; otherwise answer the request directly without a tool call.",
       "Use actual Codex Native results as evidence for local observations and effects.",
+      "Tool descriptions in the supplied context are documentation; the attached tools are the callable interface. Use that interface for required local work before concluding that local tools are unavailable.",
       "A Codex Native MCP tool result may require context compaction. If it does, follow the compaction instructions in that result exactly.",
       "After a deterministic tool failure, update the working hypothesis from that result and inspect the relevant repository or environment before choosing a different next action; do not repeat the same call unless its inputs or observable state changed.",
+      "Honor service refusals and required human actions. Never retry a refused action through another route. Continue independent authorized work only when it does not repeat that action.",
       "Continue using the available tools until the requested work is complete and verified.",
+      "Verify the final changed artifact after the last edit. Earlier checks do not verify later changes; code or simulation checks alone do not verify rendered appearance, interaction, audio, or performance.",
+      "If work cannot continue, name the attempted tool and action, quote its returned reason, and state the exact unfinished work. Distinguish a returned refusal or error from an untested assumption. Do not claim that the tool session ended, access was lost, or a service refused an action without observed evidence; if no result exists, state that the cause is unverified.",
       "Write the user-facing final answer only after the last required tool result has settled. Do not call another tool after beginning that final answer.",
     ]
     : [

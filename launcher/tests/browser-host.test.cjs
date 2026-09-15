@@ -2071,7 +2071,7 @@ test("a failed runtime cancellation keeps the running DOM attached", async () =>
   assert.deepEqual(closed, []);
 });
 
-test("a later provider round reuses only its exact connector-bound conversation", async () => {
+test("an explicit compaction handoff reuses only its exact connector-bound conversation", async () => {
   const throttling = [];
   const conversationKey = "a".repeat(64);
   const tab = {
@@ -2114,6 +2114,7 @@ test("a later provider round reuses only its exact connector-bound conversation"
     222,
     conversationKey,
     "Codex Native2",
+    true,
   );
 
   assert.deepEqual(lease, {
@@ -2131,6 +2132,33 @@ test("a later provider round reuses only its exact connector-bound conversation"
   assert.equal(fixture.selectedTabId, tab.id);
   assert.deepEqual(throttling, [false]);
   assert.deepEqual(events, ["visible", "published", "descriptor", "browser.tab_reused"]);
+});
+
+test("a Full-mode follow-up replaces its retained tab before selecting tools", async () => {
+  const conversationKey = "f".repeat(64);
+  const retained = { id: "retained", traceId: "old", status: "ready", interactionMode: "automatic",
+    conversationKey, connectorIdentity: "Codex Native2", connectorBound: true };
+  const created = { id: "fresh", surfaceId: "surface-fresh" };
+  const events = [];
+  const fixture = {
+    turnTabs: new Map([[retained.id, retained]]), userCancelledTurnOwners: new Map(),
+    removeTurnTab(tab, abortRunning) {
+      assert.equal(tab, retained);
+      assert.equal(abortRunning, false);
+      this.turnTabs.delete(tab.id);
+      events.push("removed");
+    },
+    async createTurnTab(...args) {
+      assert.deepEqual(args, ["next", 222, conversationKey, "Codex Native2"]);
+      assert.equal(this.turnTabs.has(retained.id), false);
+      events.push("created");
+      return created;
+    },
+    syncViewVisibility() {}, publishState() {}, snapshot() {}, writeDescriptor() {}, logger: { info() {} },
+  };
+  const lease = await BrowserHost.prototype.beginTurn.call(fixture, "next", false, 222, conversationKey, "Codex Native2");
+  assert.deepEqual(lease, { surfaceId: "surface-fresh", tabId: "fresh", reused: false, connectorBound: false });
+  assert.deepEqual(events, ["removed", "created"]);
 });
 
 test("a retained conversation is not reused for a different connector identity", async () => {

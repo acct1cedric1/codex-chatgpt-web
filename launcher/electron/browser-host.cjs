@@ -2233,9 +2233,16 @@ class BrowserHost {
     if (retainedMatches.length > 1) {
       throw new Error(`ChatGPT retained conversation ${conversationKey} owns multiple browser tabs`);
     }
-    const exactRetained = retainedMatches[0];
+    let exactRetained = retainedMatches[0];
     if (sameTrace?.status === "ready" && sameTrace !== exactRetained) {
       throw new Error(`ChatGPT browser turn ${traceId} is retained under different conversation metadata`);
+    }
+    // ChatGPT no longer exposes app selection after the first Temporary Chat message.
+    // Ordinary tool turns need a fresh document and the complete native context. Keep
+    // retained reuse only for the explicit compaction handoff to its existing connector.
+    if (exactRetained && connectorIdentity && !requireRetainedConversation) {
+      this.removeTurnTab(exactRetained, false);
+      exactRetained = undefined;
     }
     const existing = sameTrace?.status === "running" ? sameTrace : exactRetained;
     if (existing) {

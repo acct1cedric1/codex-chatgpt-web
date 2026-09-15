@@ -44,7 +44,9 @@ Normal turns and multipart compaction retain their existing context behavior. A 
 | Native model catalog | Native Codex app-server lists all five ChatGPT Web models after removing the old router's fixed catalog override at the user's request |
 | Authenticated browser smoke | High passed on the signed-in account |
 | Workbench restart | Sign-in, integration, smoke-test result, and enabled Bigger Context survived a same-version 5.1.1 restart |
-| Real account MCP tools | Not configured; requires the user's OpenAI Tunnel ID and runtime API key |
+| Real account MCP setup | Pass; Full mode, private runtime key, healthy tunnel, and all three Workbench setup steps verified |
+| ChatGPT connector discovery | Pass; Codex Native2 is connected, exposes six tool schemas, and has Allow all actions selected |
+| Full native tool task through ChatGPT | Not yet verified end to end |
 
 Two core skips and one launcher skip need Windows file-symlink permission. Regular-file rollback tests pass. The other launcher skips cover Linux-only behavior. The first installed smoke used the upstream 45-second process limit and timed out. An explicit installed-app run passed with a 120-second limit. The package test now allows that same limit for first-launch runtime copy and validation.
 
@@ -54,7 +56,7 @@ Parent visual QA passes for the installed 5.1.1 Setup screen: all three complete
 
 The installed program uses its own signed-in browser profile. No browser session or credentials were copied from another app. The supported setup installed the Workbench route. The old fixed catalog assignment was removed separately at the user's request. A fresh native Codex process loads the five Workbench models; already running Codex windows may still need a restart to refresh their picker. Workbench was launched through the Windows shell so its process is independent of the Codex task host.
 
-MCP account setup remains optional in the launcher and is incomplete on this machine. Local tool access through ChatGPT is therefore not yet verified. This build is installed and its browser connection works, but it is not a verified replacement for every current COS workflow. macOS and Linux packaging remain unverified for this fork.
+MCP account setup is complete on the validated Windows installation. The runtime reports Full mode, the tunnel reports healthy and ready, and Workbench confirms that Codex Native2 is available. ChatGPT loaded all six MCP tool schemas. These checks prove setup and discovery, not successful execution of every tool. A full native tool task through ChatGPT remains unverified, so this build is not yet a verified replacement for every current COS workflow. macOS and Linux packaging remain unverified for this fork. Account credentials and local setup files remain outside Git.
 
 ## Windows artifact
 

@@ -25,38 +25,38 @@ function resolveLauncherProfile({
   if (!development) {
     const coreHome = env.CODEX_CHATGPT_WEB_HOME?.trim()
       ? resolveUserPath(env.CODEX_CHATGPT_WEB_HOME.trim(), homeDir)
-      : path.join(homeDir, ".codex-chatgpt-web");
+      : path.join(homeDir, ".cos-workbench");
     const userData = env.CODEX_WEB_GPT_LAUNCHER_DATA_DIR?.trim()
       ? resolveUserPath(env.CODEX_WEB_GPT_LAUNCHER_DATA_DIR.trim(), homeDir)
-      : path.join(appData, "Codex Web GPT");
+      : path.join(appData, "COS Workbench");
     return {
       kind: PRODUCTION_PROFILE,
-      displayName: "Codex Web GPT",
+      displayName: "COS Workbench",
       coreHome,
       codexHome: env.CODEX_HOME?.trim()
         ? resolveUserPath(env.CODEX_HOME.trim(), homeDir)
         : path.join(homeDir, ".codex"),
       userData,
-      browserPartition: "persist:codex-web-gpt-chatgpt",
+      browserPartition: "persist:cos-workbench-chatgpt",
     };
   }
 
   const coreHome = env.CODEX_WEB_GPT_DEV_HOME?.trim()
     ? resolveUserPath(env.CODEX_WEB_GPT_DEV_HOME.trim(), homeDir)
-    : path.join(homeDir, ".codex-chatgpt-web-dev");
+    : path.join(homeDir, ".cos-workbench-dev");
   const productionHome = env.CODEX_CHATGPT_WEB_HOME?.trim()
     ? resolveUserPath(env.CODEX_CHATGPT_WEB_HOME.trim(), homeDir)
-    : path.join(homeDir, ".codex-chatgpt-web");
+    : path.join(homeDir, ".cos-workbench");
   if (path.resolve(coreHome) === path.resolve(productionHome)) {
     throw new Error("DEV profile home must differ from the production codex-chatgpt-web home");
   }
   return {
     kind: DEVELOPMENT_PROFILE,
-    displayName: "Codex Web GPT DEV",
+    displayName: "COS Workbench DEV",
     coreHome,
     codexHome: path.join(coreHome, "codex-home"),
     userData: path.join(coreHome, "launcher"),
-    browserPartition: "persist:codex-web-gpt-dev-chatgpt",
+    browserPartition: "persist:cos-workbench-dev-chatgpt",
   };
 }
 

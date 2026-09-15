@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-REPOSITORY="${CODEX_CHATGPT_WEB_REPOSITORY:-miuuyy/codex-chatgpt-web}"
-VERSION="${CODEX_CHATGPT_WEB_VERSION:-5.0.6}"
+REPOSITORY="${CODEX_CHATGPT_WEB_REPOSITORY:-acct1cedric1/codex-chatgpt-web}"
+VERSION="${CODEX_CHATGPT_WEB_VERSION:-5.1.0}"
 BIN_DIR="${CODEX_CHATGPT_WEB_BIN_DIR:-$HOME/.local/bin}"
 LIB_DIR="${CODEX_CHATGPT_WEB_LIB_DIR:-$HOME/.local/lib/codex-chatgpt-web}"
 DOC_DIR="${CODEX_CHATGPT_WEB_DOC_DIR:-$HOME/.local/share/doc/codex-chatgpt-web}"
@@ -66,8 +66,8 @@ if ! mv "$STAGE_DIR" "$TARGET_DIR"; then
   exit 1
 fi
 
-ln -sfn "$TARGET_DIR/bin/codex-chatgpt-web" "$BIN_DIR/.codex-chatgpt-web.next"
-mv -f "$BIN_DIR/.codex-chatgpt-web.next" "$BIN_DIR/codex-chatgpt-web"
+ln -sfn "$TARGET_DIR/bin/codex-chatgpt-web" "$BIN_DIR/.cos-workbench.next"
+mv -f "$BIN_DIR/.cos-workbench.next" "$BIN_DIR/codex-chatgpt-web"
 rm -f "$BIN_DIR/codex-chatgpt-web.legacy-standalone"
 for DOC in LICENSE Bun-1.4.0.md THIRD_PARTY_NOTICES.txt; do
   install -m 0644 "$TEMP_DIR/$DOC" "$DOC_DIR/$DOC"

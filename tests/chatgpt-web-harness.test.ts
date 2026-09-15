@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { buildResponseJSON } from "../src/bridge";
@@ -1009,7 +1009,8 @@ describe("ChatGPT outer-native harness v4", () => {
     const provider: CodexProviderConfig = {
       adapter: "chatgpt-web",
       baseUrl: "browser://chatgpt-abort-retry-test",
-      chatgptWeb: { brokerSocketPath: socketPath, localToolsEnabled: false, solAvailable: true, proAvailable: true },
+      chatgptWeb: { brokerSocketPath: socketPath, localToolsEnabled: false, solAvailable: true, proAvailable: true,
+        threadEnvironmentStatePath: join(tempRoot, "reconnect", "thread-environments.json") },
     };
     const worker = ChatGptBrowserWorker.forProvider(provider);
     const originalRun = worker.run.bind(worker);
@@ -1052,6 +1053,9 @@ describe("ChatGPT outer-native harness v4", () => {
       finishBrowser();
       await reconnect;
       expect(browserStarts).toBe(1);
+      const receipts = JSON.parse(readFileSync(join(tempRoot, "reconnect", "task-records.json"), "utf8"));
+      expect(receipts.records).toHaveLength(1);
+      expect(receipts.records[0].state).toBe("answer_returned");
       expect(events.filter((event): event is Extract<AdapterEvent, { type: "text_delta" }> => (
         event.type === "text_delta" && event.phase === "final_answer"
       ))
@@ -2166,7 +2170,8 @@ describe("ChatGPT outer-native harness v4", () => {
     const provider: CodexProviderConfig = {
       adapter: "chatgpt-web",
       baseUrl: "browser://chatgpt-usage-test",
-      chatgptWeb: { brokerSocketPath: socketPath, turnTimeoutMs: 30_000, localToolsEnabled: true, solAvailable: true, proAvailable: true },
+      chatgptWeb: { brokerSocketPath: socketPath, turnTimeoutMs: 30_000, localToolsEnabled: true, solAvailable: true, proAvailable: true,
+        threadEnvironmentStatePath: join(tempRoot, "tool-receipts", "thread-environments.json") },
     };
     const worker = ChatGptBrowserWorker.forProvider(provider);
     const originalRun = worker.run.bind(worker);
@@ -2248,6 +2253,12 @@ describe("ChatGPT outer-native harness v4", () => {
       expect(finalDone).toMatchObject({ type: "done", stopReason: "stop", endTurn: true });
       expect(finalDone.usage!.inputTokens).toBeGreaterThan(95_000);
       expect(finalDone.usage!.inputTokens).toBeGreaterThan(firstDone.usage!.inputTokens + 50_000);
+      const receiptText = readFileSync(join(tempRoot, "tool-receipts", "task-records.json"), "utf8");
+      const receipt = JSON.parse(receiptText).records[0];
+      expect(receipt.state).toBe("answer_returned");
+      expect(receipt.tools).toEqual([{id: call!.id, name: "exec_command", state: "returned", exitCode: 0}]);
+      expect(receiptText).not.toContain("collect-large-evidence");
+      expect(receiptText).not.toContain("abcdefghij0123456789");
     } finally {
       (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = originalRun;
       await TurnBroker.forSocket(socketPath).close();

@@ -1,6 +1,6 @@
 {
-  "name": "codex-web-gpt-launcher",
-  "version": "5.0.6",
+  "name": "cos-workbench-launcher",
+  "version": "5.1.0",
   "private": true,
   "description": "Desktop control center for Codex ChatGPT Web",
   "author": "miuuyy",
@@ -38,12 +38,13 @@
   },
   "overrides": {
     "@xmldom/xmldom": "0.8.15",
-    "fast-uri": "3.1.6"
+    "fast-uri": "3.1.6",
+    "js-yaml": "4.3.2"
   },
   "build": {
-    "appId": "dev.codexwebgpt.launcher",
-    "productName": "Codex Web GPT",
-    "artifactName": "codex-web-gpt-${version}-${os}-${arch}.${ext}",
+    "appId": "dev.cos.workbench",
+    "productName": "COS Workbench",
+    "artifactName": "cos-workbench-${version}-${os}-${arch}.${ext}",
     "asar": true,
     "asarUnpack": [
       "assets/linux-appimage-runner.sh"
@@ -84,7 +85,7 @@
       "target": ["AppImage"]
     },
     "nsis": {
-      "guid": "d1a6026a-6210-588e-9a2b-da3936f94e02",
+      "guid": "6746dc11-02ba-41cb-a4b3-2d9c7fbb40ec",
       "oneClick": false,
       "perMachine": false,
       "allowElevation": false,

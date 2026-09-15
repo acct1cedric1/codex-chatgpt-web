@@ -289,6 +289,27 @@ function unansweredBrokerEndpoint(name: string, onConnection: (socket: Socket) =
   };
 }
 
+test("a bounded broker reply closes the request half after the complete frame", async () => {
+  const broker = unansweredBrokerEndpoint("cgw-broker-half-close-", socket => {
+    socket.setEncoding("utf8");
+    let input = "";
+    socket.on("data", chunk => {
+      input += chunk;
+      if (!input.includes("\n")) return;
+      const request = JSON.parse(input);
+      socket.write(`${JSON.stringify({ id: request.id, result: { ok: true } })}\n`);
+      // The peer must finish its request half before this single-request pipe can close.
+    });
+  });
+  await broker.listen();
+  try {
+    await expect(callTurnBroker(broker.socketPath, { method: "owner_status" }, 500))
+      .resolves.toEqual({ ok: true });
+  } finally {
+    await broker.close();
+  }
+});
+
 test("an unbounded broker call fails when the broker closes without answering", async () => {
   const broker = unansweredBrokerEndpoint("cgw-broker-closed-", socket => socket.on("data", () => socket.end()));
   await broker.listen();

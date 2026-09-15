@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { TaskRecords } from "./task-records";
 import { isChatGptWebZeroRiskBackendModel } from "../../chatgpt-web-models";
 import { defaultBrokerEndpoint, expandUserPath, resolveBrokerEndpoint } from "../../config";
 import {
@@ -381,6 +382,9 @@ export function createChatGptWebAdapter(
       ? resolve(expandUserPath(provider.chatgptWeb.lunaCheckpointStatePath))
       : undefined,
   );
+  const taskRecords = TaskRecords.forPath(provider.chatgptWeb?.threadEnvironmentStatePath
+    ? join(dirname(resolve(expandUserPath(provider.chatgptWeb.threadEnvironmentStatePath))), "task-records.json")
+    : undefined);
   const currentUsageInput = (parsed: CodexParsedRequest): CodexParsedRequest => (
     parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID && !parsed._compactionRequest
       ? lunaCheckpointStore.apply(parsed).parsed
@@ -1120,7 +1124,26 @@ export function createChatGptWebAdapter(
         const session = await chatGptTurnSessions.getOrCreateAfterOwnerRetirement(
           executionKey,
           ownerKey,
-          () => startRuntime(parsed, environment, traceId, turnCapabilities),
+          () => {
+            if (!parsed._compactionRequest) {
+              taskRecords.begin(traceId, nativeIdentity.threadId, nativeTurnId, parsed.modelId);
+            }
+            try {
+              const runtime = startRuntime(parsed, environment, traceId, turnCapabilities);
+              if (!parsed._compactionRequest) {
+                // The browser can settle after its HTTP observer disconnects, or during
+                // compaction. Record settlement even when no next Responses request arrives.
+                void runtime.browser.then(
+                  () => taskRecords.finish(traceId, "answer_returned"),
+                  () => taskRecords.finish(traceId, "needs_review"),
+                ).catch(error => console.error("[cos] task receipt settlement failed", error));
+              }
+              return runtime;
+            } catch (error) {
+              if (!parsed._compactionRequest) taskRecords.finish(traceId, "needs_review");
+              throw error;
+            }
+          },
           traceId,
           incoming.abortSignal,
           nativeTurnId,
@@ -1196,6 +1219,7 @@ export function createChatGptWebAdapter(
               ));
               session.completeRound(roundKey);
               chatGptWebTurnRetryPolicy.clear(retryKey);
+              if (!parsed._compactionRequest) taskRecords.finish(traceId, "answer_returned");
               return;
             }
 
@@ -1223,7 +1247,9 @@ export function createChatGptWebAdapter(
                   throw new Error(`Codex returned ${results.length} of ${outstanding.length} results for a parallel ChatGPT tool batch`);
                 }
                 for (const message of results) {
-                  await broker.completeTool(turnToken, message.toolCallId, brokerResult(message));
+                  const result = brokerResult(message);
+                  if (!parsed._compactionRequest) taskRecords.complete(traceId, message.toolCallId, result);
+                  await broker.completeTool(turnToken, message.toolCallId, result);
                   session.runtime.externalProgress.recordToolResult();
                   session.markResultDelivered(message.toolCallId);
                 }
@@ -1302,6 +1328,7 @@ export function createChatGptWebAdapter(
                 ));
                 session.completeRound(roundKey);
                 chatGptWebTurnRetryPolicy.clear(retryKey);
+                if (!parsed._compactionRequest) taskRecords.finish(traceId, "answer_returned");
               };
               const waitForTrace = () => session.runtime.trace.wait(toolWaitAbort.signal)
                 .then(() => ({ type: "trace" as const }))
@@ -1352,6 +1379,7 @@ export function createChatGptWebAdapter(
                   return;
                 }
                 validateBatchTools(parsed, next.requests);
+                if (!parsed._compactionRequest) taskRecords.dispatch(traceId, next.requests);
                 session.setOutstanding(next.requests, roundReasoning, session.roundEvents(roundKey));
                 emitRoundBatch(buffer => emitToolBatch(
                   next.requests,
@@ -1366,6 +1394,9 @@ export function createChatGptWebAdapter(
             }
           });
         } catch (error) {
+          if (!parsed._compactionRequest && (!incoming.abortSignal?.aborted || session.runtime.manualControl)) {
+            taskRecords.finish(traceId, "needs_review");
+          }
           if (incoming.abortSignal?.aborted && error instanceof DOMException && error.name === "AbortError") {
             if (session.runtime.manualControl) {
               // Zero Risk is user-driven and has no DOM observer that can distinguish continued

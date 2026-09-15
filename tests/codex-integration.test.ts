@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -32,6 +32,21 @@ import {
 
 const roots: string[] = [];
 
+// Windows needs Developer Mode or a symlink privilege for file links.
+// Keep the regular-file transaction tests active when that OS feature is absent.
+const supportsFileLinks = (() => {
+  if (process.platform !== "win32") return true;
+  const root = mkdtempSync(join(tmpdir(), "cos-file-link-probe-"));
+  try {
+    writeFileSync(join(root, "target"), "probe");
+    symlinkSync(join(root, "target"), join(root, "link"));
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EPERM") return false;
+    throw error;
+  } finally { rmSync(root, { recursive: true }); }
+})();
+
 function nativeConfig(mode: "browser-only" | "full") {
   const config = defaultConfig(mode);
   config.subagentProtocol = "native";
@@ -62,7 +77,7 @@ afterEach(() => {
 });
 
 describe("reversible native Codex route integration", () => {
-  test("route install, update, switching and removal preserve a symlinked shared Codex config", () => {
+  test.skipIf(!supportsFileLinks)("route install, update, switching and removal preserve a symlinked shared Codex config", () => {
     const { root, codexHome } = fixture();
     const shared = join(root, "shared");
     mkdirSync(shared, { mode: 0o750 });
@@ -96,7 +111,7 @@ describe("reversible native Codex route integration", () => {
     expect(readFileSync(target, "utf8")).toBe(original);
   });
 
-  test("config compensation preserves the link and refuses redirected or invalid targets", () => {
+  test.skipIf(!supportsFileLinks)("config compensation preserves the link and refuses redirected or invalid targets", () => {
     const { root, codexHome } = fixture();
     const alias = join(codexHome, "config.toml");
     const target = join(root, "shared.toml");

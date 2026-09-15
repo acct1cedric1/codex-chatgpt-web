@@ -112,8 +112,8 @@ function assertDescriptorShape(value: unknown): LauncherBrowserHostDescriptor {
     throw new Error("Launcher browser descriptor helper script does not exist");
   }
   const expectedPartition = descriptor.profile === "development"
-    ? "persist:codex-web-gpt-dev-chatgpt"
-    : "persist:codex-web-gpt-chatgpt";
+    ? "persist:cos-workbench-dev-chatgpt"
+    : "persist:cos-workbench-chatgpt";
   if (descriptor.partition !== expectedPartition) {
     throw new Error("Launcher browser descriptor identifies an unexpected browser partition");
   }

@@ -21,6 +21,7 @@ import type {
   LogRecord,
   OperationState,
   Surface,
+  TaskRecord,
 } from "./types";
 
 const api = window.codexWebLauncher;
@@ -152,7 +153,7 @@ function Onboarding({
   snapshot: LauncherSnapshot;
   updateState: (state: LauncherState) => void;
 }) {
-  const [stage, setStage] = useState<"language" | "interaction" | "support">(
+  const [stage, setStage] = useState<"language" | "interaction">(
     snapshot.state.language ? "interaction" : "language",
   );
   const [selectedLanguage, setSelectedLanguage] = useState<Language>(language);
@@ -162,8 +163,7 @@ function Onboarding({
   const [busy, setBusy] = useState(false);
   const localized = copyFor(selectedLanguage);
   const isLanguage = stage === "language";
-  const isInteraction = stage === "interaction";
-  const stageIndex = isLanguage ? 0 : isInteraction ? 1 : 2;
+  const stageIndex = isLanguage ? 0 : 1;
 
   const chooseLanguage = async () => {
     setBusy(true);
@@ -171,18 +171,6 @@ function Onboarding({
     try {
       updateState(await api!.setLanguage(selectedLanguage));
       setStage("interaction");
-    } catch (cause) {
-      setError(messageOf(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const openSocial = async (target: "github" | "x") => {
-    setBusy(true);
-    setError(null);
-    try {
-      updateState(await api!.openSocial(target));
     } catch (cause) {
       setError(messageOf(cause));
     } finally {
@@ -231,10 +219,10 @@ function Onboarding({
           <span className="welcome-kicker">0{stageIndex + 1}</span>
           <h1>{isLanguage
             ? localized.chooseLanguage
-            : isInteraction ? localized.interactionMode : localized.supportTitle}</h1>
+            : localized.interactionMode}</h1>
           <p>{isLanguage
             ? localized.chooseLanguageHint
-            : isInteraction ? localized.interactionModeOnboardingBody : localized.supportBody}</p>
+            : localized.interactionModeOnboardingBody}</p>
 
           {isLanguage ? (
             <div className="welcome-options" role="radiogroup" aria-label={localized.chooseLanguage}>
@@ -260,7 +248,7 @@ function Onboarding({
                 onClick={() => setSelectedLanguage("ja")}
               />
             </div>
-          ) : isInteraction ? (
+          ) : (
             <InteractionModePicker
               className="welcome-interaction-mode-picker"
               copy={localized}
@@ -268,23 +256,7 @@ function Onboarding({
               mode={selectedInteractionMode}
               onChange={setSelectedInteractionMode}
             />
-          ) : (
-            <div className="welcome-options">
-              <WelcomeAction
-                complete={snapshot.state.githubOpened}
-                disabled={busy}
-                icon="github"
-                label={snapshot.state.githubOpened ? localized.starred : localized.star}
-                onClick={() => openSocial("github")}
-              />
-              <WelcomeAction
-                complete={snapshot.state.xOpened}
-                disabled={busy}
-                icon="x"
-                label={snapshot.state.xOpened ? localized.followed : localized.follow}
-                onClick={() => openSocial("x")}
-              />
-            </div>
+
           )}
         </motion.section>
       </AnimatePresence>
@@ -294,15 +266,15 @@ function Onboarding({
           {!isLanguage ? (
             <button
               className="text-button"
-              onClick={() => setStage(isInteraction ? "language" : "interaction")}
+              onClick={() => setStage("language")}
               type="button"
             >
               {localized.previous}
             </button>
           ) : null}
         </div>
-        <div className="welcome-progress" aria-label={`${stageIndex + 1} / 3`}>
-          {[0, 1, 2].map(index => (
+        <div className="welcome-progress" aria-label={`${stageIndex + 1} / 2`}>
+          {[0, 1].map(index => (
             <span
               className={index < stageIndex ? "is-complete" : index === stageIndex ? "is-active" : ""}
               key={index}
@@ -310,12 +282,12 @@ function Onboarding({
           ))}
         </div>
         <PrimaryButton
-          disabled={busy || (stage === "support" && (!snapshot.state.githubOpened || !snapshot.state.xOpened))}
+          disabled={busy}
           onClick={isLanguage
             ? chooseLanguage
-            : isInteraction ? () => setStage("support") : finish}
+            : finish}
         >
-          {stage === "support" ? localized.finishWelcome : localized.continue}
+          {isLanguage ? localized.continue : localized.finishWelcome}
         </PrimaryButton>
       </footer>
     </motion.main>
@@ -570,11 +542,6 @@ function LauncherShell({
                   icon="github"
                   label="GitHub"
                   onClick={() => void api!.openExternal(snapshot.urls.github).catch((cause) => setError(messageOf(cause)))}
-                />
-                <IconButton
-                  icon="x"
-                  label="X"
-                  onClick={() => void api!.openExternal(snapshot.urls.x).catch((cause) => setError(messageOf(cause)))}
                 />
               </div>
             </div>
@@ -1542,8 +1509,67 @@ function ActivitySurface({
   logs: LogRecord[];
   setError: (error: string | null) => void;
 }) {
+  const [records, setRecords] = useState<TaskRecord[] | null>(null);
+  const [recordError, setRecordError] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [copying, setCopying] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async () => {
+      try {
+        const next = await api!.taskHistory();
+        if (live) { setRecords(next); setRecordError(null); }
+      } catch (cause) {
+        if (live) setRecordError(messageOf(cause));
+      } finally {
+        if (live) timer = setTimeout(() => void refresh(), 3000);
+      }
+    };
+    void refresh();
+    return () => { live = false; clearTimeout(timer); };
+  }, []);
+  const copyRecovery = async (traceId: string) => {
+    setCopying(traceId);
+    try { await api!.copyTaskRecovery(traceId); setCopied(traceId); }
+    catch (cause) { setError(messageOf(cause)); }
+    finally { setCopying(null); }
+  };
   return (
     <ContentSurface subtitle={copy.activitySubtitle} title={copy.activityTitle}>
+      <section className="task-records" aria-label={copy.taskRecords}>
+        <div className="section-heading"><span>{copy.taskRecords}</span></div>
+        <p className="task-records-hint">{copy.taskRecordsHint}</p>
+        {recordError ? <p className="task-records-error" role="alert">{recordError}</p> : null}
+        {!recordError && records === null ? <p role="status">{copy.taskRecordsLoading}</p> : null}
+        {records?.length === 0 ? <div className="task-records-empty"><Icon name="logs" /><p>{copy.taskRecordsEmpty}</p></div> : null}
+        {records?.map(record => (
+          <details className="task-record" key={record.traceId}>
+            <summary>
+              <StateDot state={record.state === "needs_review" ? "error" : record.state === "running" ? "busy" : "idle"} />
+              <div className="task-record-heading">
+                <strong>{record.state === "needs_review" ? copy.taskReview : record.state === "running" ? copy.taskRunning : copy.taskAnswered}</strong>
+                <span>{copy.taskTools}: {record.totalCalls} · {copy.taskErrors}: {record.errors}</span>
+              </div>
+              <time dateTime={record.updatedAt}>{new Date(record.updatedAt).toLocaleString(language, {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"})}</time>
+              <span className="task-record-chevron" aria-hidden="true">⌄</span>
+            </summary>
+            <div className="task-record-body">
+              <code>{record.threadId ?? record.traceId}<br />{record.turnId}</code>
+              <p>{record.model}</p>
+              <ul>{record.tools.map(tool => (
+                <li key={tool.id}><code>{tool.name}</code><span data-outcome={tool.state}>
+                  {tool.state === "pending" ? copy.taskPending : tool.state === "unknown" ? copy.taskUnknown : tool.state === "error" ? copy.taskError : copy.taskReturned}
+                  {tool.exitCode === null ? "" : ` · exit ${tool.exitCode}`}
+                </span></li>
+              ))}</ul>
+              <p>{copy.taskReturnHint}</p>
+              <SecondaryButton disabled={copying !== null} onClick={() => void copyRecovery(record.traceId)}>{copy.taskCopy}</SecondaryButton>
+              {copied === record.traceId ? <span className="task-copy-feedback" role="status">{copy.taskCopied}</span> : null}
+            </div>
+          </details>
+        ))}
+      </section>
       <div className="section-heading activity-heading">
         <span>{copy.recentActivity}</span>
         <SecondaryButton
@@ -2184,33 +2210,6 @@ function WelcomeOption({
   );
 }
 
-function WelcomeAction({
-  complete,
-  disabled,
-  icon,
-  label,
-  onClick,
-}: {
-  complete: boolean;
-  disabled?: boolean;
-  icon: "github" | "x";
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      className={`welcome-option is-social${complete ? " is-complete" : ""}`}
-      disabled={disabled}
-      onClick={onClick}
-      type="button"
-    >
-      <span><Icon name={icon} /></span>
-      <strong>{label}</strong>
-      <Icon name={complete ? "check" : "external"} />
-    </button>
-  );
-}
-
 function PrimaryButton({
   children,
   disabled = false,
@@ -2364,10 +2363,8 @@ function BrandMark({ small = false }: { small?: boolean }) {
   return (
     <span className={`brand-mark${small ? " is-small" : ""}`}>
       <svg aria-hidden="true" viewBox="0 0 24 24">
-        <path
-          d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"
-          fill="currentColor"
-        />
+        <path d="M19 5H9L4 10v9h15v-4H8v-3l3-3h8Z" fill="currentColor" />
+        <path d="M15 11h5v2h-5Z" fill="currentColor" />
       </svg>
     </span>
   );

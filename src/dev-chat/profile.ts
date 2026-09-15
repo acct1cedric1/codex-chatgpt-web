@@ -21,7 +21,7 @@ export interface DevProfilePaths {
   configPath: string;
 }
 
-const WINDOWS_LAUNCHER_GUID = "d1a6026a-6210-588e-9a2b-da3936f94e02";
+const WINDOWS_LAUNCHER_GUID = "6746dc11-02ba-41cb-a4b3-2d9c7fbb40ec";
 
 function registeredWindowsLauncherInstallLocation(): string | undefined {
   try {
@@ -45,10 +45,10 @@ export function resolveDevProfilePaths({
   homeDirectory?: string;
 } = {}): DevProfilePaths {
   const home = resolve(expandUserPath(
-    environment.CODEX_WEB_GPT_DEV_HOME?.trim() || join(homeDirectory, ".codex-chatgpt-web-dev"),
+    environment.CODEX_WEB_GPT_DEV_HOME?.trim() || join(homeDirectory, ".cos-workbench-dev"),
   ));
   const productionHome = resolve(expandUserPath(
-    environment.CODEX_CHATGPT_WEB_HOME?.trim() || join(homeDirectory, ".codex-chatgpt-web"),
+    environment.CODEX_CHATGPT_WEB_HOME?.trim() || join(homeDirectory, ".cos-workbench"),
   ));
   if (home === productionHome) {
     throw new Error("DEV profile home must differ from the production codex-chatgpt-web home");
@@ -128,25 +128,25 @@ export function installedLauncherCandidates({
   const targetPath = platform === "win32" ? win32 : posix;
   if (platform === "darwin") {
     candidates.push(
-      "/Applications/Codex Web GPT.app/Contents/MacOS/Codex Web GPT",
-      posix.join(homeDirectory, "Applications", "Codex Web GPT.app", "Contents", "MacOS", "Codex Web GPT"),
+      "/Applications/COS Workbench.app/Contents/MacOS/COS Workbench",
+      posix.join(homeDirectory, "Applications", "COS Workbench.app", "Contents", "MacOS", "COS Workbench"),
     );
   } else if (platform === "win32") {
     const registeredLocation = windowsInstallLocation?.trim()
       || (process.platform === "win32" && environment === process.env
         ? registeredWindowsLauncherInstallLocation() : undefined);
     if (registeredLocation && win32.isAbsolute(registeredLocation)) {
-      candidates.push(win32.join(registeredLocation, "Codex Web GPT.exe"));
+      candidates.push(win32.join(registeredLocation, "COS Workbench.exe"));
     } else {
       const localAppData = environment.LOCALAPPDATA?.trim();
       if (localAppData) {
-        candidates.push(win32.join(localAppData, "Programs", "Codex Web GPT", "Codex Web GPT.exe"));
+        candidates.push(win32.join(localAppData, "Programs", "COS Workbench", "COS Workbench.exe"));
       }
     }
   } else if (platform === "linux") {
-    candidates.push(posix.join(homeDirectory, ".local", "bin", "codex-web-gpt"));
+    candidates.push(posix.join(homeDirectory, ".local", "bin", "cos-workbench"));
     for (const entry of (environment.PATH || "").split(":").filter(Boolean)) {
-      candidates.push(posix.join(entry, "codex-web-gpt"));
+      candidates.push(posix.join(entry, "cos-workbench"));
     }
   }
   return [...new Set(candidates.map(candidate => targetPath.resolve(candidate)))];
@@ -157,7 +157,7 @@ export function findInstalledLauncherExecutable(options: Parameters<typeof insta
   const executable = candidates.find(executableFile);
   if (executable) return executable;
   throw new Error(
-    "Installed Codex Web GPT launcher was not found. Install it first or set CODEX_WEB_GPT_LAUNCHER_EXECUTABLE to its absolute executable path."
+    "Installed COS Workbench launcher was not found. Install it first or set CODEX_WEB_GPT_LAUNCHER_EXECUTABLE to its absolute executable path."
       + ` Checked: ${candidates.join(", ") || "no platform candidates"}`,
   );
 }

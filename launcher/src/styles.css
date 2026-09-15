@@ -2703,3 +2703,32 @@ code {
     transition-duration: 0.01ms !important;
   }
 }
+
+
+/* Native task receipts: neutral outcomes, explicit uncertainty. */
+.task-records { margin-bottom: 36px; }
+.task-records-hint, .task-record-body > p { color: var(--color-text-secondary); font-size: 12px; line-height: 1.65; }
+.task-records-hint { margin: 0 0 20px; max-width: 560px; }
+.task-records-empty { display: flex; align-items: center; gap: 18px; padding: 28px 24px; border: 1px solid var(--color-border-heavy); border-radius: 10px; }
+.task-records-empty svg { width: 24px; flex-shrink: 0; color: var(--color-text-accent); }
+.task-records-empty p { margin: 0; max-width: 430px; color: var(--color-text-secondary); font-size: 13px; line-height: 1.65; }
+.task-record { border-top: 1px solid var(--color-border-heavy); }
+.task-record:last-child { border-bottom: 1px solid var(--color-border-heavy); }
+.task-record summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 14px; padding: 18px 6px; border-radius: 4px; }
+.task-record summary::-webkit-details-marker { display: none; }
+.task-record summary:hover { background: var(--color-background-control-hover); }
+.task-record summary:focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: 2px; }
+.task-record-heading { flex: 1; min-width: 0; display: grid; gap: 5px; }
+.task-record-heading strong { font-size: 13px; font-weight: 600; }
+.task-record-heading span, .task-record time { font-size: 11px; color: var(--color-text-secondary); }
+.task-record-chevron { width: 14px; color: var(--color-text-tertiary); }
+.task-record[open] .task-record-chevron { transform: rotate(180deg); }
+.task-record-body { padding: 0 6px 22px 28px; }
+.task-record-body > code { display: block; overflow-wrap: anywhere; line-height: 1.8; font-size: 11px; color: var(--color-text-secondary); }
+.task-record-body ul { list-style: none; margin: 18px 0; padding: 0; }
+.task-record-body li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--color-border); font-size: 12px; }
+.task-record-body li code { overflow-wrap: anywhere; }
+.task-record-body [data-outcome="unknown"], .task-record-body [data-outcome="pending"] { color: var(--color-text-warning); }
+.task-record-body [data-outcome="error"], .task-records-error { color: var(--color-text-error); }
+.task-copy-feedback { display: block; margin-top: 10px; color: var(--color-text-accent); font-size: 12px; }
+@media (max-width: 620px) { .task-record time { max-width: 75px; text-align: right; line-height: 1.5; } }

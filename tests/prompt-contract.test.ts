@@ -11,6 +11,7 @@ import {
 import { CHATGPT_WEB_LUNA_MODEL_ID, CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
 import { biggerContextPartCount } from "../src/adapters/chatgpt-web/usage";
 import type { CodexParsedRequest } from "../src/types";
+import { SUMMARY_PREFIX } from "../src/responses/compaction";
 
 function request(reasoning: "low" | "medium" | "high" | "xhigh" | "max"): CodexParsedRequest {
   return {
@@ -252,6 +253,45 @@ test("Web compaction trims only the oldest history until the browser request fit
   expect(untrimmed.text).toContain("oldest-static");
   expect(untrimmed.text).toContain("newer-static");
   expect(untrimmed.trimmedCompactionMessages).toBeUndefined();
+});
+
+test("fallback compaction retains cumulative checkpoints and reports omitted history", () => {
+  const compact = request("high");
+  compact._compactionRequest = true;
+  compact.context.systemPrompt = [];
+  compact.context.messages = [
+    { role: "user", content: `${SUMMARY_PREFIX}\n\noriginal-scope-${"s".repeat(20_000)}`, timestamp: 1 },
+    { role: "toolResult", toolCallId: "old", toolName: "read", isError: false, content: "old-output-" + "x".repeat(100_000), timestamp: 2 },
+    { role: "user", content: [{ type: "text", text: `${SUMMARY_PREFIX}\nverified-checkpoint` }], timestamp: 3 },
+    { role: "assistant", content: [{ type: "text", text: "recent-progress" }], timestamp: 4 },
+    { role: "user", content: "checkpoint-now", timestamp: 5 },
+  ];
+
+  const compiled = compileChatGptWebPrompt(
+    compact, { localToolsEnabled: false, solAvailable: true, proAvailable: true },
+  );
+  expect(compiled.text).toContain("original-scope-");
+  expect(compiled.text).toContain("verified-checkpoint");
+  expect(compiled.text).toContain("recent-progress");
+  expect(compiled.text).toContain("checkpoint-now");
+  expect(compiled.text).not.toContain("old-output-");
+  expect(compiled.trimmedCompactionMessages).toBe(1);
+  expect(compiled.text).toContain("1 older history item(s) omitted");
+  expect(compiled.text).not.toContain("The task context is complete.");
+  expect(chatGptPromptJsonBytes(compiled.text)).toBeLessThanOrEqual(CHATGPT_COMPACTION_PROMPT_JSON_BYTE_BUDGET);
+});
+
+test("fallback compaction refuses to discard an oversized cumulative checkpoint", () => {
+  const compact = request("high");
+  compact._compactionRequest = true;
+  compact.context.systemPrompt = [];
+  compact.context.messages = [
+    { role: "user", content: `${SUMMARY_PREFIX}\n\n${"s".repeat(120_000)}`, timestamp: 1 },
+    { role: "user", content: "checkpoint-now", timestamp: 2 },
+  ];
+  expect(() => compileChatGptWebPrompt(
+    compact, { localToolsEnabled: false, solAvailable: true, proAvailable: true },
+  )).toThrow("retained checkpoints");
 });
 
 test("Bigger Context compaction preserves history above the retired inline byte budget", () => {

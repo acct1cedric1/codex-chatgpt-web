@@ -1,5 +1,11 @@
 <h1 align="center">ChatGPT Web for Codex</h1>
 
+> **COS development fork:** This fork focuses on task continuity and verified
+> results. The first change preserves cumulative checkpoints during fallback
+> compaction. Read the [fork status and validation limits](docs/fork-status.md).
+> This branch is not a validated release. The installation commands below
+> still install upstream releases, not this fork.
+
 <p align="center">
   <strong>Use ChatGPT Web (including Pro) as native Codex models.</strong><br>
   Change the model tier, save your workflow.

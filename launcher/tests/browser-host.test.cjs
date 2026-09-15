@@ -762,7 +762,9 @@ test("guest and incomplete server sessions do not prove launcher authentication"
 });
 
 test("launcher authentication requires the Temporary Chat composer and complete server session", async () => {
+  let persisted = false;
   const fixture = {
+    persistSession: async () => { persisted = true; },
     state: { authenticated: false },
     activeTraceId: null,
     manualOperation: null,
@@ -778,7 +780,10 @@ test("launcher authentication requires the Temporary Chat composer and complete 
         }),
       },
     },
-    setState(patch) { this.state = { ...this.state, ...patch }; },
+    setState(patch) {
+      if (patch.authenticated) assert.equal(persisted, true);
+      this.state = { ...this.state, ...patch };
+    },
     snapshot() { return { ...this.state }; },
     logger: { info() {} },
   };
@@ -786,6 +791,10 @@ test("launcher authentication requires the Temporary Chat composer and complete 
   const result = await BrowserHost.prototype.probeAuthentication.call(fixture);
   assert.equal(result.authenticated, true);
   assert.equal(result.status, "ready");
+  fixture.state.authenticated = false;
+  fixture.persistSession = async () => { throw new Error("Session flush failed"); };
+  await assert.rejects(BrowserHost.prototype.probeAuthentication.call(fixture), /Session flush failed/);
+  assert.equal(fixture.state.authenticated, false);
 });
 
 test("authentication windows stay inside the launcher-owned browser partition", () => {
@@ -1108,6 +1117,7 @@ test("OAuth completion is re-proved on the primary Temporary Chat surface before
     manualOperation: "ChatGPT login",
     authView: completedAuthView,
     state: { authenticated: false },
+    persistSession: async () => {},
     logger: { info() {} },
     view: {
       webContents: {
@@ -1150,6 +1160,7 @@ test("a successful primary login redirect is re-proved on Temporary Chat before 
   let currentUrl = "https://chatgpt.com/";
   const loadedUrls = [];
   const fixture = {
+    persistSession: async () => {},
     activeTraceId: null,
     manualOperation: "ChatGPT login",
     authView: null,

@@ -2677,6 +2677,9 @@ class BrowserHost {
         this.closeAuthView(this.authView, true, false);
       }
       const wasAuthenticated = this.state.authenticated;
+      // Commit the owned session before reporting sign-in as complete. A parent process
+      // can exit before the normal launcher shutdown gets a chance to flush Chromium.
+      if (!wasAuthenticated) await this.persistSession();
       const availability = this.activeTraceId
         ? { status: "running", message: "ChatGPT is working" }
         : this.manualOperation

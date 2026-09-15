@@ -1286,7 +1286,7 @@ test("launcher supervisor refuses shutdown while a Codex turn is active and comp
   };
   await assert.rejects(
     supervisor.acquireDrain({}, 0),
-    /atomic idleness could not be proven.*1 active HTTP turn/,
+    /Finish or cancel active Codex turns, then retry this change.*1 active HTTP turn/,
   );
   assert.deepEqual(actions, ["drain", "resume"]);
 });

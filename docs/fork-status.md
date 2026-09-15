@@ -1,4 +1,4 @@
-# COS Workbench 5.1.0
+# COS Workbench 5.1.1
 
 COS Workbench is a Windows desktop fork of miuuyy/codex-chatgpt-web v5.0.6. It keeps native Codex in charge of tools, approvals and terminal sessions. The MIT license and upstream attribution remain intact.
 
@@ -11,6 +11,8 @@ COS Workbench is a Windows desktop fork of miuuyy/codex-chatgpt-web v5.0.6. It k
 - **Windows broker:** a bounded one-request/one-reply connection ends the client write side after a full response. Empty EOF fails promptly. This removes the reproduced named-pipe close deadlock.
 - **Independent desktop identity:** COS Workbench has its own app ID, installer GUID, icon, browser partition, data folders and fork-only updater. Setup no longer requires visiting social pages.
 - **Dependency fixes:** Hono is pinned to 4.13.5; launcher js-yaml is pinned to 4.3.2. Both audits report no known vulnerabilities at validation time.
+- **Sign-in persistence:** version 5.1.1 flushes the owned Chromium session before it reports a new sign-in as complete. It also keeps the normal shutdown flush.
+- **Setup feedback:** installation has its own completed state while native catalog verification remains separate. A busy runtime explains that the active Codex turn must finish or be cancelled before a settings change. It still refuses to stop an active turn.
 
 ## Ownership and limits
 
@@ -33,23 +35,31 @@ Normal turns and multipart compaction retain their existing context behavior. A 
 | Restart, task isolation, error receipts and conflicting result tests | Pass |
 | Core and renderer TypeScript checks | Pass |
 | Core and launcher dependency audits | No known vulnerabilities reported |
-| Version synchronization | 5.1.0 / Bun 1.4.0 |
+| Version synchronization | 5.1.1 / Bun 1.4.0 |
 | Relocated bundled runtime | `RELOCATABLE_RUNTIME_SMOKE_OK` |
 | Windows NSIS install | Installed under the current user |
-| Installed app startup | Exit 0; packaged=true, runtimeVerified=true, version=5.1.0 |
+| Installed app startup | 5.1.0 isolated packaged smoke passed; 5.1.1 installed and reopened with the managed runtime |
 | Parent visual QA | PASS: onboarding, setup, empty records, review records, copy feedback; 1120px and 760px views |
 | Renderer runtime checks | No page errors; compact view has no horizontal overflow |
-| Existing native Codex configuration | Same hash before and after installation and first launch |
-| Authenticated browser smoke / real account tools | Pending user sign-in and account/MCP setup |
+| Native model catalog | Native Codex app-server lists all five ChatGPT Web models after removing the old router's fixed catalog override at the user's request |
+| Authenticated browser smoke | High passed on the signed-in account |
+| Workbench restart | Sign-in, integration, smoke-test result, and enabled Bigger Context survived a same-version 5.1.1 restart |
+| Real account MCP tools | Not configured; requires the user's OpenAI Tunnel ID and runtime API key |
 
 Two core skips and one launcher skip need Windows file-symlink permission. Regular-file rollback tests pass. The other launcher skips cover Linux-only behavior. The first installed smoke used the upstream 45-second process limit and timed out. An explicit installed-app run passed with a 120-second limit. The package test now allows that same limit for first-launch runtime copy and validation.
 
-The installed program opens the supported ChatGPT login page. No browser session or credentials were copied from another app. The current Codex route remains active until account setup and a live smoke test pass. This build is installed, but it is not yet a verified replacement for the current COS workflow. macOS and Linux packaging remain unverified for this fork.
+The 5.1.1 launcher suite passes 295 tests with the same three platform skips. This includes the session flush ordering and failed-flush checks, busy-turn refusal, and drain compensation. The renderer build and version checks pass.
+
+Parent visual QA passes for the installed 5.1.1 Setup screen: all three completed checks are visible, no restart notice remains after catalog verification, and MCP is clearly separate. The installed main process, browser host, supervisor, preload, task-history reader, profile, and icon match the source files.
+
+The installed program uses its own signed-in browser profile. No browser session or credentials were copied from another app. The supported setup installed the Workbench route. The old fixed catalog assignment was removed separately at the user's request. A fresh native Codex process loads the five Workbench models; already running Codex windows may still need a restart to refresh their picker. Workbench was launched through the Windows shell so its process is independent of the Codex task host.
+
+MCP account setup remains optional in the launcher and is incomplete on this machine. Local tool access through ChatGPT is therefore not yet verified. This build is installed and its browser connection works, but it is not a verified replacement for every current COS workflow. macOS and Linux packaging remain unverified for this fork.
 
 ## Windows artifact
 
-`cos-workbench-5.1.0-win-x64.exe`
+`cos-workbench-5.1.1-win-x64.exe`
 
-SHA-256: `6b4b782f132c5753f2fbe1c2e6e4333d771ba8c44db66a43f27ab49104b97662`
+SHA-256: `578b23285ac10bd51c78f83f670ad898a4025e95349d8e2b788bd1e2db1b8d24`
 
 Build with the commands in [README](../README.md). The local executable and receipts stay out of the Git source tree. The updater accepts release assets only from `acct1cedric1/codex-chatgpt-web`; an unpublished stable release means no update is available.

@@ -4,7 +4,9 @@ COS Workbench is our Windows desktop fork of codex-chatgpt-web. It connects a si
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md)
 
-Version 5.1.0 adds cumulative checkpoint retention, durable tool receipts, restart review, a Windows broker fix, and direct setup without a social-link gate. The app uses its own data directory and icon. Codex still owns execution, approvals and terminal sessions.
+Version 5.1 adds cumulative checkpoint retention, durable tool receipts, restart review, a Windows broker fix, and direct setup without a social-link gate. The app uses its own data directory and icon. Codex still owns execution, approvals and terminal sessions.
+
+The 5.1.1 update saves the browser session before confirming sign-in, shows installation separately from model-list verification, and explains how to retry a settings change when a Codex turn is active. The Windows install has passed sign-in, live browser, native model-list, Bigger Context, and same-version restart checks. MCP account setup is still required for local tools through ChatGPT.
 
 This is an unofficial integration. It needs your own ChatGPT sign-in and available account features. Browser changes and service limits still apply. It does not bypass approvals or service refusals. A returned tool result does not prove a task succeeded.
 

@@ -1802,9 +1802,12 @@ class RuntimeSupervisor {
         }
         if (health.active_http_turns === 0 && health.active_browser_turns === 0) return true;
         if (Date.now() >= deadline) {
-          throw new Error(
-            `daemon has ${health.active_http_turns} active HTTP turn(s) and ${health.active_browser_turns} active browser turn(s)`,
+          const busy = new Error(
+            "Finish or cancel active Codex turns, then retry this change. "
+            + `The runtime has ${health.active_http_turns} active HTTP turn(s) and ${health.active_browser_turns} active browser turn(s).`,
           );
+          busy.code = "RUNTIME_BUSY";
+          throw busy;
         }
         await sleep(Math.min(DRAIN_POLL_INTERVAL_MS, Math.max(1, deadline - Date.now())));
       }
@@ -1820,6 +1823,7 @@ class RuntimeSupervisor {
       const message = resumeError
         ? appendFailure(errorMessage(error), "compensating resume failed", resumeError)
         : errorMessage(error);
+      if (error?.code === "RUNTIME_BUSY" && !resumeError) throw new Error(message);
       throw new Error(`Refusing to stop launcher-owned runtime because atomic idleness could not be proven: ${message}`);
     }
   }

@@ -1148,7 +1148,7 @@ function SetupSurface({
           action={snapshot.state.coreSetupComplete
             ? devProfile ? copy.devReinstall : copy.reinstall
             : devProfile ? copy.devInstall : copy.install}
-          complete={snapshot.state.codexCatalogVerified === true}
+          complete={snapshot.state.coreSetupComplete === true}
           description={devProfile ? copy.devStepInstallBody : copy.stepInstallBody}
           disabled={busy || (!snapshot.smokePassed && snapshot.state.coreSetupComplete !== true)}
           index={manualInteraction ? 1 : 3}

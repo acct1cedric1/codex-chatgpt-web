@@ -2,13 +2,13 @@ import { chatGptWebTraceId, createChatGptWebAdapter } from "./adapters/chatgpt-w
 import { closeChatGptBrowserWorkers } from "./adapters/chatgpt-web/browser-worker";
 import { closeTurnBrokers, TurnBroker } from "./adapters/chatgpt-web/turn-broker";
 import { timingSafeEqual } from "node:crypto";
-import { chatGptTurnSessions } from "./adapters/chatgpt-web/turn-execution";
+import { chatGptTurnRoundKey, chatGptTurnSessions } from "./adapters/chatgpt-web/turn-execution";
 import {
   cancelAllStructuredCompactions,
   cancelStructuredCompactionNativeTurn,
   cancelStructuredCompactionTrace,
 } from "./adapters/chatgpt-web/compaction-handoff";
-import { chatGptBrowserTabClosedError } from "./adapters/chatgpt-web/adapter-error";
+import { ChatGptWebAdapterError, chatGptBrowserTabClosedError } from "./adapters/chatgpt-web/adapter-error";
 import {
   CHATGPT_TURN_REVISION_CONFLICT_MESSAGE,
   extractChatGptTurnIdentity,
@@ -569,17 +569,16 @@ export async function responseRequest(
     if (!message.includes("requires native Codex turn_id metadata")
       && !message.includes("requires a current-turn user message")) throw error;
   }
-  const cancelledError = traceId ? chatGptTurnSessions.cancelledError(traceId) : undefined;
-  if (cancelledError) {
-    // Codex retries unknown streamed response.failed codes. A replay after the user explicitly
-    // closed the only browser document is instead a terminal client state: repeating that exact
-    // request is invalid and must not recreate the DOM. Codex maps HTTP 400 to its non-retryable
-    // InvalidRequest category while the body preserves the real client_cancelled classification.
+  const terminalError = traceId ? chatGptTurnSessions.terminalError(traceId, chatGptTurnRoundKey(parsed)) : undefined;
+  if (terminalError) {
+    // Codex retries unknown streamed response.failed codes even with retryable:false. An exact
+    // replay of a cancelled or otherwise non-retryable round must stop before opening SSE again.
+    // HTTP 400 selects Codex's terminal InvalidRequest category; retain the original cause in JSON.
     return new Response(JSON.stringify({
       error: {
-        type: "client_closed_request",
-        code: "client_cancelled",
-        message: cancelledError.message,
+        type: terminalError instanceof ChatGptWebAdapterError ? terminalError.errorType : "client_closed_request",
+        code: terminalError instanceof ChatGptWebAdapterError ? terminalError.code : "client_cancelled",
+        message: terminalError.message,
       },
     }), {
       status: 400,

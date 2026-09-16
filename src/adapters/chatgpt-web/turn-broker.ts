@@ -1257,6 +1257,10 @@ export async function callTurnBroker<T>(
     // The server owns response termination. Waiting for the pipe/socket to close before resolving
     // prevents callers from retiring the broker while Bun still has a named-pipe write in flight.
     socket.once("close", finishResponse);
+    socket.once("end", () => {
+      if (!response) finishError(new Error("ChatGPT web turn broker closed the connection"));
+      else socket.end();
+    });
     socket.once("connect", () => socket.write(`${JSON.stringify({ id, ...wireRequest })}\n`));
     socket.on("data", chunk => {
       if (settled || response) return;
@@ -1284,6 +1288,11 @@ export async function callTurnBroker<T>(
         // frame is therefore the terminal boundary; ordinary calls still wait for physical close.
         finishResponse();
         socket.destroy();
+      } else {
+        // This connection carries one request and one reply. Finish the request half once the
+        // complete reply arrives; Windows named pipes can otherwise wait indefinitely for it.
+        // Keep waiting for physical close before callers are allowed to retire the broker.
+        socket.end();
       }
     });
   });

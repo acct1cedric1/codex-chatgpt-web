@@ -54,7 +54,7 @@ test("descriptor publishes native surface identities without inspecting renderer
     surfaceId: "h".repeat(32), view: { webContents: contents("home-target") },
     turnTabs: new Map([["automatic", automatic], ["manual", manual]]),
     getBrowserInteractionMode: () => "automatic", profile: "production", cdpPort: 40000,
-    partition: "persist:codex-web-gpt-chatgpt", control: {}, helper: {},
+    partition: "persist:cos-workbench-chatgpt", control: {}, helper: {},
     descriptorPath: require("node:path").join(dir, "descriptor.json"),
   };
   try {
@@ -762,7 +762,9 @@ test("guest and incomplete server sessions do not prove launcher authentication"
 });
 
 test("launcher authentication requires the Temporary Chat composer and complete server session", async () => {
+  let persisted = false;
   const fixture = {
+    persistSession: async () => { persisted = true; },
     state: { authenticated: false },
     activeTraceId: null,
     manualOperation: null,
@@ -778,7 +780,10 @@ test("launcher authentication requires the Temporary Chat composer and complete 
         }),
       },
     },
-    setState(patch) { this.state = { ...this.state, ...patch }; },
+    setState(patch) {
+      if (patch.authenticated) assert.equal(persisted, true);
+      this.state = { ...this.state, ...patch };
+    },
     snapshot() { return { ...this.state }; },
     logger: { info() {} },
   };
@@ -786,6 +791,10 @@ test("launcher authentication requires the Temporary Chat composer and complete 
   const result = await BrowserHost.prototype.probeAuthentication.call(fixture);
   assert.equal(result.authenticated, true);
   assert.equal(result.status, "ready");
+  fixture.state.authenticated = false;
+  fixture.persistSession = async () => { throw new Error("Session flush failed"); };
+  await assert.rejects(BrowserHost.prototype.probeAuthentication.call(fixture), /Session flush failed/);
+  assert.equal(fixture.state.authenticated, false);
 });
 
 test("authentication windows stay inside the launcher-owned browser partition", () => {
@@ -1108,6 +1117,7 @@ test("OAuth completion is re-proved on the primary Temporary Chat surface before
     manualOperation: "ChatGPT login",
     authView: completedAuthView,
     state: { authenticated: false },
+    persistSession: async () => {},
     logger: { info() {} },
     view: {
       webContents: {
@@ -1150,6 +1160,7 @@ test("a successful primary login redirect is re-proved on Temporary Chat before 
   let currentUrl = "https://chatgpt.com/";
   const loadedUrls = [];
   const fixture = {
+    persistSession: async () => {},
     activeTraceId: null,
     manualOperation: "ChatGPT login",
     authView: null,
@@ -2060,7 +2071,7 @@ test("a failed runtime cancellation keeps the running DOM attached", async () =>
   assert.deepEqual(closed, []);
 });
 
-test("a later provider round reuses only its exact connector-bound conversation", async () => {
+test("an explicit compaction handoff reuses only its exact connector-bound conversation", async () => {
   const throttling = [];
   const conversationKey = "a".repeat(64);
   const tab = {
@@ -2103,6 +2114,7 @@ test("a later provider round reuses only its exact connector-bound conversation"
     222,
     conversationKey,
     "Codex Native2",
+    true,
   );
 
   assert.deepEqual(lease, {
@@ -2120,6 +2132,33 @@ test("a later provider round reuses only its exact connector-bound conversation"
   assert.equal(fixture.selectedTabId, tab.id);
   assert.deepEqual(throttling, [false]);
   assert.deepEqual(events, ["visible", "published", "descriptor", "browser.tab_reused"]);
+});
+
+test("a Full-mode follow-up replaces its retained tab before selecting tools", async () => {
+  const conversationKey = "f".repeat(64);
+  const retained = { id: "retained", traceId: "old", status: "ready", interactionMode: "automatic",
+    conversationKey, connectorIdentity: "Codex Native2", connectorBound: true };
+  const created = { id: "fresh", surfaceId: "surface-fresh" };
+  const events = [];
+  const fixture = {
+    turnTabs: new Map([[retained.id, retained]]), userCancelledTurnOwners: new Map(),
+    removeTurnTab(tab, abortRunning) {
+      assert.equal(tab, retained);
+      assert.equal(abortRunning, false);
+      this.turnTabs.delete(tab.id);
+      events.push("removed");
+    },
+    async createTurnTab(...args) {
+      assert.deepEqual(args, ["next", 222, conversationKey, "Codex Native2"]);
+      assert.equal(this.turnTabs.has(retained.id), false);
+      events.push("created");
+      return created;
+    },
+    syncViewVisibility() {}, publishState() {}, snapshot() {}, writeDescriptor() {}, logger: { info() {} },
+  };
+  const lease = await BrowserHost.prototype.beginTurn.call(fixture, "next", false, 222, conversationKey, "Codex Native2");
+  assert.deepEqual(lease, { surfaceId: "surface-fresh", tabId: "fresh", reused: false, connectorBound: false });
+  assert.deepEqual(events, ["removed", "created"]);
 });
 
 test("a retained conversation is not reused for a different connector identity", async () => {

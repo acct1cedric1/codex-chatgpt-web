@@ -1181,6 +1181,7 @@ interface ChatGptSubmissionBaseline {
   userTurns: Locator;
   responseTurns: Locator;
   initialTurnIdentities: readonly string[];
+  submittedUserIdentity?: string;
   domCache: ChatGptSubmissionDomCache;
 }
 
@@ -1256,17 +1257,6 @@ export function chatGptSubmissionEvidence(state: {
   if (chatGptNewTurnIdentity(state.initialTurnIdentities, state.responseIdentities)) return "assistant_turn";
   if (state.generationRunning) return "generation_running";
   return undefined;
-}
-
-export type ChatGptConnectorAttachmentMode = "none" | "mention" | "retained";
-
-/** A launcher lease may reuse a connector only after proving that exact retained surface is bound. */
-export function chatGptConnectorAttachmentMode(
-  localTools: boolean,
-  reuseConversation: boolean,
-): ChatGptConnectorAttachmentMode {
-  if (!localTools) return "none";
-  return reuseConversation ? "retained" : "mention";
 }
 
 export async function setChatGptThinkMode(
@@ -1356,18 +1346,33 @@ export function chatGptNewTurnIdentity(
   const previous = new Set(initial);
   const added = current.filter(identity => !previous.has(identity));
   if (added.length > 1) {
-    throw new Error(`ChatGPT exposed ${added.length} new conversation turns for one submitted message`);
+    throw new ChatGptWebAdapterError(
+      `ChatGPT exposed ${added.length} new conversation turns for one submitted message. Workbench could not identify the response safely.`,
+      { status: 502, errorType: "server_error", code: "chatgpt_turn_identity_ambiguous", retryable: false },
+    );
   }
   return added[0];
 }
 
-export function chatGptReboundTurnIdentity(
-  initial: readonly string[],
-  boundIdentity: string,
-  current: readonly string[],
+export function chatGptSubmissionResponseIdentity(
+  baseline: Pick<ChatGptSubmissionBaseline, "initialTurnIdentities" | "submittedUserIdentity">,
+  state: Pick<ChatGptSubmissionDomState, "turnIdentities" | "userIdentities" | "responseIdentities">,
 ): string | undefined {
-  if (current.includes(boundIdentity)) return boundIdentity;
-  return chatGptNewTurnIdentity(initial, current);
+  baseline.submittedUserIdentity ??= chatGptNewTurnIdentity(baseline.initialTurnIdentities, state.userIdentities);
+  if (!baseline.submittedUserIdentity) return undefined;
+  const userIndex = state.turnIdentities.indexOf(baseline.submittedUserIdentity);
+  if (userIndex < 0) return undefined;
+  // A staged acknowledgement can receive a new DOM identity when the current answer remounts.
+  // Only responses after the exact submitted user belong to this submission. Keep using its
+  // outer container when virtualization removes the user section; never select by last().
+  const following = new Set(state.turnIdentities.slice(userIndex + 1));
+  if (state.userIdentities.some(identity => following.has(identity))) {
+    throw new ChatGptWebAdapterError(
+      "ChatGPT opened another user turn while Workbench was tracking the submitted response.",
+      { status: 502, errorType: "server_error", code: "chatgpt_turn_identity_ambiguous", retryable: false },
+    );
+  }
+  return chatGptNewTurnIdentity([], state.responseIdentities.filter(identity => following.has(identity)));
 }
 
 export class ChatGptCompletionTracker {
@@ -2712,6 +2717,7 @@ export class ChatGptBrowserWorker {
     signal?: AbortSignal,
   ): Promise<ChatGptSubmissionEvidence | undefined> {
     const state = await this.submissionDomState(page, baseline.domCache, signal);
+    baseline.submittedUserIdentity ??= chatGptNewTurnIdentity(baseline.initialTurnIdentities, state.userIdentities);
     return chatGptSubmissionEvidence({
       initialTurnIdentities: baseline.initialTurnIdentities,
       userIdentities: state.userIdentities,
@@ -2726,10 +2732,7 @@ export class ChatGptBrowserWorker {
     signal?: AbortSignal,
   ): Promise<string> {
     const state = await this.submissionDomState(page, baseline.domCache, signal);
-    const identity = chatGptNewTurnIdentity(
-      baseline.initialTurnIdentities,
-      state.responseIdentities,
-    );
+    const identity = chatGptSubmissionResponseIdentity(baseline, state);
     if (!identity) return "";
     const locator = page.locator(`[data-turn-id=${JSON.stringify(identity)}]`);
     return (await this.responseDomSnapshot(locator, {})).visibleText;
@@ -2821,10 +2824,7 @@ export class ChatGptBrowserWorker {
       // acknowledging its boundary; the pre-probe snapshot can otherwise leave the broker waiting
       // despite this exact iteration having successfully observed the page.
       progress = externalProgress?.snapshot();
-      const identity = chatGptNewTurnIdentity(
-        observationBaseline.initialTurnIdentities,
-        state.responseIdentities,
-      );
+      const identity = chatGptSubmissionResponseIdentity(observationBaseline, state);
       if (progress
         && externalProgress
         && completionTracker?.needsToolBatchObservation(progress.lastToolBatchRevision)) {
@@ -2873,13 +2873,12 @@ export class ChatGptBrowserWorker {
     const state = await this.submissionDomState(page, baseline.domCache, signal);
     const acceptedTurns = new Set(binding.acceptedTurnIdentities);
     if (state.userIdentities.some(identity => !acceptedTurns.has(identity))) {
-      throw new Error("ChatGPT opened another user turn while the bound assistant response was detached");
+      throw new ChatGptWebAdapterError(
+        "ChatGPT opened another user turn while the bound assistant response was detached.",
+        { status: 502, errorType: "server_error", code: "chatgpt_turn_identity_ambiguous", retryable: false },
+      );
     }
-    const identity = chatGptReboundTurnIdentity(
-      baseline.initialTurnIdentities,
-      binding.identity,
-      state.responseIdentities,
-    );
+    const identity = chatGptSubmissionResponseIdentity(baseline, state);
     if (!identity || identity === binding.identity) return binding;
     return {
       identity,
@@ -3240,14 +3239,12 @@ export class ChatGptBrowserWorker {
     abortSignal?: AbortSignal,
     catalogRefreshAvailable = false,
     connectorAttemptBudget?: ChatGptConnectorAttemptBudget,
-    reuseConnector = false,
     requireThink = false,
   ): Promise<void> {
     throwIfPromptAttachmentAborted(abortSignal);
-    const connectorMode = chatGptConnectorAttachmentMode(localTools, reuseConnector);
     let composerMutationStarted = false;
     try {
-      if (connectorMode !== "mention") {
+      if (!localTools) {
         const composer = await this.activeComposer(page, 30_000, abortSignal);
         // Playwright's multiline fill maps through an input action that ChatGPT's Lexical editor can
         // collapse to the first paragraph on the launcher-owned Electron surface. Clear separately,
@@ -3262,6 +3259,8 @@ export class ChatGptBrowserWorker {
         await this.assertPromptAttached(page, prompt, abortSignal);
         return;
       }
+      // Prove the connector attachment for this message, including retained control handoffs.
+      // ChatGPT consumes the selected pill on send; chat reuse does not preserve tool availability.
       const selectedComposer = await this.selectConnector(
         page,
         captureDiagnostic,
@@ -3545,7 +3544,6 @@ export class ChatGptBrowserWorker {
     abortSignal?: AbortSignal,
     catalogRefreshAvailable = false,
     connectorAttemptBudget?: ChatGptConnectorAttemptBudget,
-    reuseConnector = false,
     requireThink = false,
   ): Promise<void> {
     let retryAvailable = compaction;
@@ -3559,7 +3557,6 @@ export class ChatGptBrowserWorker {
           abortSignal,
           catalogRefreshAvailable,
           connectorAttemptBudget,
-          reuseConnector,
           requireThink,
         );
         return;
@@ -4514,8 +4511,7 @@ export class ChatGptBrowserWorker {
           ),
         );
       }
-      // A retained lease proves the connector binding, not the current model selection.
-      // Reconcile the live control before every submission, including retained continuations.
+      // Reconcile the live model control on both fresh turns and retained control handoffs.
       let mode = await this.runStage(turn.traceId, "effort_selection", browserStageTimeouts.effortSelection, () => (
         this.selectModelAndEffort(
           page,
@@ -4631,7 +4627,10 @@ export class ChatGptBrowserWorker {
       }
 
       let submissionBaseline = await this.captureSubmissionBaseline(page);
-      let catalogRefreshAvailable = mode.localTools && !reuseConversation && !prepared.multipart;
+      // Connector selection belongs to the message, not the retained conversation. A control
+      // handoff still needs the connector; its one-shot token limits it to checkpoint submission.
+      const attachConnector = mode.localTools;
+      let catalogRefreshAvailable = attachConnector && !reuseConversation && !prepared.multipart;
       const connectorAttemptBudget: ChatGptConnectorAttemptBudget = { triggerAttempts: 0 };
       for (;;) {
         try {
@@ -4646,14 +4645,13 @@ export class ChatGptBrowserWorker {
               return this.attachPromptWithCompactionRetry(
                 page,
                 finalPrompt,
-                mode.localTools,
+                attachConnector,
                 turn.compaction === true,
                 submissionBaseline,
                 checkpoint => diagnostics.capture(page, checkpoint),
                 promptAbortSignal,
                 catalogRefreshAvailable,
                 connectorAttemptBudget,
-                reuseConversation,
                 mode.thinkEnabled,
               );
             },

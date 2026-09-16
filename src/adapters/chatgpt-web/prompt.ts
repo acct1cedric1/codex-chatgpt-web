@@ -26,7 +26,7 @@ export interface CompiledChatGptWebPrompt {
   images: ChatGptWebPromptImage[];
   /** DEV-only transactional context transport. Production prompts remain inline. */
   multipart?: ChatGptWebMultipartPrompt;
-  /** Oldest history items removed by native-style compaction fit recovery; absent on normal turns. */
+  /** Oldest non-checkpoint history items removed to fit compaction; absent on normal turns. */
   trimmedCompactionMessages?: number;
 }
 
@@ -498,9 +498,13 @@ export function compileChatGptWebPrompt(
       "For local work required by the task, use the attached Codex Native tools directly according to their declared descriptions and schemas.",
       "Call a Codex Native tool only when the latest active request requires a local effect or fresh local evidence that is not already present in the supplied context; otherwise answer the request directly without a tool call.",
       "Use actual Codex Native results as evidence for local observations and effects.",
+      "Tool descriptions in the supplied context are documentation; the attached tools are the callable interface. Use that interface for required local work before concluding that local tools are unavailable.",
       "A Codex Native MCP tool result may require context compaction. If it does, follow the compaction instructions in that result exactly.",
       "After a deterministic tool failure, update the working hypothesis from that result and inspect the relevant repository or environment before choosing a different next action; do not repeat the same call unless its inputs or observable state changed.",
+      "Honor service refusals and required human actions. Never retry a refused action through another route. Continue independent authorized work only when it does not repeat that action.",
       "Continue using the available tools until the requested work is complete and verified.",
+      "Verify the final changed artifact after the last edit. Earlier checks do not verify later changes; code or simulation checks alone do not verify rendered appearance, interaction, audio, or performance.",
+      "If work cannot continue, name the attempted tool and action, quote its returned reason, and state the exact unfinished work. Distinguish a returned refusal or error from an untested assumption. Do not claim that the tool session ended, access was lost, or a service refused an action without observed evidence; if no result exists, state that the cause is unverified.",
       "Write the user-facing final answer only after the last required tool result has settled. Do not call another tool after beginning that final answer.",
     ]
     : [
@@ -549,16 +553,20 @@ export function compileChatGptWebPrompt(
       "</codex_zero_risk_request_json>",
     ]
     : [];
-  const transportResume = parsed._compactionRequest
+  const transportResume = (trimmedMessages: number): string[] => {
+    const contextStatus = trimmedMessages > 0
+      ? `${trimmedMessages} older history item(s) omitted to fit the compaction budget. Preserve the retained checkpoints; do not invent omitted details.`
+      : "The task context is complete.";
+    return parsed._compactionRequest
     ? manualControl
       ? [
         "<codex_transport_resume>",
-        "The task context is complete. Produce the requested checkpoint summary now.",
+        `${contextStatus} Produce the requested checkpoint summary now.`,
         "</codex_transport_resume>",
       ]
       : [
       "<codex_transport_resume>",
-      "The task context is complete. Produce the requested checkpoint summary now without calling tools.",
+      `${contextStatus} Produce the requested checkpoint summary now without calling tools.`,
       "</codex_transport_resume>",
       ]
     : manualControl
@@ -578,7 +586,8 @@ export function compileChatGptWebPrompt(
       "The task context is complete. Execute the latest active user request now under the capability contract above.",
       "</codex_transport_resume>",
     ];
-  const build = (sourceMessages: readonly CodexMessage[]): CompiledChatGptWebPrompt => {
+  };
+  const build = (sourceMessages: readonly CodexMessage[], trimmedMessages = 0): CompiledChatGptWebPrompt => {
     const images: ChatGptWebPromptImage[] = [];
     const budget: ImageBudget = {
       seen: 0,
@@ -611,7 +620,7 @@ export function compileChatGptWebPrompt(
           ...manualControlContract,
           ...checkpointContract,
           answerContract,
-          ...transportResume,
+          ...transportResume(trimmedMessages),
         ].join("\n"),
       };
       const imageTokens = images.reduce((sum, image) => sum + chatGptWebImageTokenReserve(image.detail), 0);
@@ -650,7 +659,7 @@ export function compileChatGptWebPrompt(
       "<codex_context_json>",
       envelopeJson,
       "</codex_context_json>",
-      ...transportResume,
+      ...transportResume(trimmedMessages),
     ].join("\n");
     return { text, images };
   };
@@ -671,20 +680,27 @@ export function compileChatGptWebPrompt(
     chatGptPromptJsonBytes(compiled.text) > CHATGPT_COMPACTION_PROMPT_JSON_BYTE_BUDGET
   );
 
-  // Match native Codex compaction recovery: discard oldest history items one at a time until the
-  // summarization request fits. Never discard the final compaction instruction itself, and rebuild
-  // image references after every trim so removed messages cannot leave orphaned attachments.
+  // A cumulative checkpoint may be the only record of the original task after earlier compaction.
+  // Keep every readable checkpoint and the final instruction. Trim other history in order, and
+  // rebuild image references so removed messages cannot leave orphaned attachments.
   while (
     exceedsCompactionBudget()
     && sourceMessages.length > 1
   ) {
-    sourceMessages = sourceMessages.slice(1);
-    compiled = build(sourceMessages);
+    const removableIndex = sourceMessages.findIndex((message, index) =>
+      index < sourceMessages.length - 1
+      && !(message.role === "user" && isReadableCompactionSummaryText(plainMessageText(message))),
+    );
+    if (removableIndex < 0) break;
+    sourceMessages = sourceMessages.filter((_message, index) => index !== removableIndex);
+    compiled = build(sourceMessages, initialMessageCount - sourceMessages.length);
   }
   const encodedBytes = chatGptPromptJsonBytes(compiled.text);
   if (exceedsCompactionBudget()) {
     throw new Error(
-      `ChatGPT Web compaction prompt still requires ${encodedBytes.toLocaleString("en-US")} JSON bytes after all older history was trimmed; the final compaction instruction alone exceeds the browser compaction budget`,
+      `ChatGPT Web compaction prompt still requires ${encodedBytes.toLocaleString("en-US")} JSON bytes after removable history was trimmed; ${
+        sourceMessages.length > 1 ? "the retained checkpoints and final compaction instruction exceed" : "the final compaction instruction alone exceeds"
+      } the browser compaction budget`,
     );
   }
   const trimmedCompactionMessages = initialMessageCount - sourceMessages.length;

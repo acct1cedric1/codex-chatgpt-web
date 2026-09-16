@@ -6,7 +6,7 @@ import type {
 } from "../../types";
 import { extractChatGptCompactionSourceRevision } from "./environment";
 import type { ChatGptBrowserWorker } from "./browser-worker";
-import { ChatGptCompactionHandoffAccepted } from "./adapter-error";
+import { ChatGptCompactionHandoffAccepted, ChatGptWebAdapterError } from "./adapter-error";
 import type { CompactionTransactionHandle } from "./compaction-transaction";
 import type { ChatGptWebCapabilities } from "./model";
 import {
@@ -130,8 +130,11 @@ function currentToolResults(
 
 export const MAX_COMPACTION_HANDOFF_TIMEOUT_MS = 5 * 60_000;
 
-function boundedCompactionTimeout(timeoutMs: number): number {
-  return Math.min(timeoutMs, MAX_COMPACTION_HANDOFF_TIMEOUT_MS);
+export function compactionHandoffTimeoutMs(parsed: CodexParsedRequest, configuredMs?: number): number {
+  // Pro can still be generating at five minutes. Use the same budget for source settlement,
+  // the retained control transaction and a fresh checkpoint; an explicit shorter limit wins.
+  const maximum = parsed.options.reasoning === "max" ? 30 * 60_000 : MAX_COMPACTION_HANDOFF_TIMEOUT_MS;
+  return Math.min(configuredMs ?? maximum, maximum);
 }
 
 function abortReason(signal: AbortSignal): Error {
@@ -164,6 +167,7 @@ export async function settleActiveCompactionSource(
   source: ChatGptTurnSession,
   broker: TurnBroker,
   signal?: AbortSignal,
+  onToolResult?: (callId: string, result: BrokerToolResult) => void,
 ): Promise<{ answer: string; compactionInstructionDelivered: boolean }> {
   return source.runExclusive(async () => {
     if (signal?.aborted) {
@@ -186,10 +190,14 @@ export async function settleActiveCompactionSource(
       broker.requestCompaction(token, interruptedByActiveCompaction());
       for (const request of outstanding) {
         const result = results.get(request.callId)!;
+        const canonical = toolResult(result);
+        // Compaction consumes native results without the ordinary Responses continuation.
+        // Commit its receipt before the browser can settle and mark a pending result unknown.
+        onToolResult?.(request.callId, canonical);
         await broker.completeTool(
           token,
           request.callId,
-          toolResult(result),
+          canonical,
         );
         source.runtime.externalProgress.recordToolResult();
         source.markResultDelivered(request.callId);
@@ -220,6 +228,7 @@ export async function settleActiveZeroRiskCompactionSource(
   source: ChatGptTurnSession,
   broker: TurnBrokerOwner,
   signal?: AbortSignal,
+  onToolResult?: (callId: string, result: BrokerToolResult) => void,
 ): Promise<string | undefined> {
   return source.runExclusive(async () => {
     if (signal?.aborted) {
@@ -246,6 +255,7 @@ export async function settleActiveZeroRiskCompactionSource(
       for (const [index, request] of outstanding.entries()) {
         const result = results.get(request.callId)!;
         const canonical = toolResult(result);
+        onToolResult?.(request.callId, canonical);
         await broker.completeTool(
           token,
           request.callId,
@@ -282,11 +292,11 @@ export async function requestRetainedCompactionHandoff(
   capabilities: ChatGptWebCapabilities,
   traceId: string,
   signal?: AbortSignal,
-  timeoutMs = MAX_COMPACTION_HANDOFF_TIMEOUT_MS,
+  timeoutMs = compactionHandoffTimeoutMs(parsed),
 ): Promise<string> {
   const conversationKey = source.conversationKey();
   if (!conversationKey) throw new Error("The completed ChatGPT source has no retained conversation identity");
-  const operationTimeoutMs = boundedCompactionTimeout(timeoutMs);
+  const operationTimeoutMs = compactionHandoffTimeoutMs(parsed, timeoutMs);
   const deadline = new AbortController();
   const deadlineTimer = setTimeout(
     () => deadline.abort(new Error(`ChatGPT compaction handoff timed out after ${operationTimeoutMs}ms`)),
@@ -328,7 +338,19 @@ export async function requestRetainedCompactionHandoff(
       onTextDelta: () => {},
     });
     const browserFailure = browser.then<never>(
-      () => new Promise<never>(() => {}),
+      () => {
+        // The broker accepts the checkpoint before its tool response reaches ChatGPT. A
+        // completed browser response without that receipt cannot make further progress.
+        throw new ChatGptWebAdapterError(
+          "ChatGPT finished without submitting the context checkpoint. Check the ChatGPT tab for the reason before retrying.",
+          {
+            status: 409,
+            errorType: "invalid_request_error",
+            code: "compaction_handoff_missing",
+            retryable: false,
+          },
+        );
+      },
       error => { throw error; },
     );
     const summary = await withCompactionAbort(

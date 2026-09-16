@@ -10,7 +10,7 @@ const launcherManifest = JSON.parse(
   fs.readFileSync(path.join(launcherRoot, "package.json"), "utf8"),
 );
 const expectedVersion = launcherManifest.version;
-const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-package-smoke-"));
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "cos-workbench-package-smoke-"));
 const markerPath = path.join(scratch, "ready.json");
 const coreHome = path.join(scratch, "core-home");
 let macAppBundle;
@@ -82,8 +82,8 @@ try {
     const stage = path.join(scratch, "stage");
     fs.mkdirSync(stage);
     run("ditto", ["-x", "-k", archive, stage]);
-    macAppBundle = path.join(stage, "Codex Web GPT.app");
-    executable = path.join(macAppBundle, "Contents", "MacOS", "Codex Web GPT");
+    macAppBundle = path.join(stage, "COS Workbench.app");
+    executable = path.join(macAppBundle, "Contents", "MacOS", "COS Workbench");
     command = executable;
     args = ["--launcher-smoke-test"];
   } else if (process.platform === "linux") {
@@ -106,7 +106,8 @@ try {
   }
 
   if (!fs.existsSync(executable)) throw new Error(`Packaged launcher executable is missing: ${executable}`);
-  run(command, args, { env });
+  // First launch copies and validates the bundled runtime. Cold Windows file scans can exceed 45 seconds.
+  run(command, args, { env, timeout: 120_000 });
   if (!fs.existsSync(markerPath)) throw new Error("Packaged launcher did not write its readiness marker");
   const marker = JSON.parse(fs.readFileSync(markerPath, "utf8"));
   if (marker.ok !== true

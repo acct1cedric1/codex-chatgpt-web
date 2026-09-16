@@ -1,9 +1,9 @@
 :root {
   color-scheme: dark;
 
-  --blue-100: #99ceff;
-  --blue-300: #339cff;
-  --blue-900: #00284d;
+  --blue-100: #e8c990;
+  --blue-300: #cca762;
+  --blue-900: #352b1d;
   --gray-0: #ffffff;
   --gray-100: #ededed;
   --gray-300: #afafaf;
@@ -47,9 +47,9 @@
   --color-border: rgb(255 255 255 / 8%);
   --color-border-light: rgb(255 255 255 / 4%);
   --color-border-heavy: rgb(255 255 255 / 16%);
-  --color-border-focus: rgb(51 156 255 / 70%);
+  --color-border-focus: rgb(204 167 98 / 80%);
 
-  --font-ui: "OpenAI Sans", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Hiragino Sans", "Yu Gothic UI", "Meiryo", "Segoe UI", sans-serif;
+  --font-ui: "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Hiragino Sans", "Yu Gothic UI", "Meiryo", "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace;
   --text-xs: 11px;
   --text-sm: 12px;

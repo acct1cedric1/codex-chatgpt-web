@@ -33,7 +33,7 @@ test("DEV profile paths isolate browser, Codex, config, chat, and runtime state"
 });
 
 test("Bigger Context is disabled by default and read from the isolated DEV runtime config", () => {
-  const root = mkdtempSync(join(tmpdir(), "codex-web-gpt-dev-features-"));
+  const root = mkdtempSync(join(tmpdir(), "cos-workbench-dev-features-"));
   try {
     const paths = resolveDevProfilePaths({
       homeDirectory: root,
@@ -73,53 +73,53 @@ test("installed launcher discovery has explicit platform candidates", () => {
     homeDirectory: "/Users/tester",
     environment: {},
   })).toEqual([
-    "/Applications/Codex Web GPT.app/Contents/MacOS/Codex Web GPT",
-    "/Users/tester/Applications/Codex Web GPT.app/Contents/MacOS/Codex Web GPT",
+    "/Applications/COS Workbench.app/Contents/MacOS/COS Workbench",
+    "/Users/tester/Applications/COS Workbench.app/Contents/MacOS/COS Workbench",
   ]);
   expect(installedLauncherCandidates({
     platform: "linux",
     homeDirectory: "/home/tester",
     environment: { PATH: "/usr/local/bin:/usr/bin" },
   })).toEqual([
-    "/home/tester/.local/bin/codex-web-gpt",
-    "/usr/local/bin/codex-web-gpt",
-    "/usr/bin/codex-web-gpt",
+    "/home/tester/.local/bin/cos-workbench",
+    "/usr/local/bin/cos-workbench",
+    "/usr/bin/cos-workbench",
   ]);
   expect(installedLauncherCandidates({
     platform: "win32",
     homeDirectory: "C:\\Users\\tester",
     environment: { LOCALAPPDATA: "C:\\Users\\tester\\AppData\\Local" },
   })).toEqual([
-    "C:\\Users\\tester\\AppData\\Local\\Programs\\Codex Web GPT\\Codex Web GPT.exe",
+    "C:\\Users\\tester\\AppData\\Local\\Programs\\COS Workbench\\COS Workbench.exe",
   ]);
   expect(installedLauncherCandidates({
     platform: "win32",
     homeDirectory: "C:\\Users\\tester",
     environment: { LOCALAPPDATA: "C:\\Users\\tester\\AppData\\Local" },
-    windowsInstallLocation: "D:\\Apps\\Codex Web GPT",
+    windowsInstallLocation: "D:\\Apps\\COS Workbench",
   })).toEqual([
-    "D:\\Apps\\Codex Web GPT\\Codex Web GPT.exe",
+    "D:\\Apps\\COS Workbench\\COS Workbench.exe",
   ]);
 });
 
 test("injected Windows discovery avoids the live registry while ordinary discovery still uses it", () => {
   const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
   const registry = spyOn(childProcess, "execFileSync").mockImplementation((() =>
-    "    InstallLocation    REG_SZ    D:\\Installed\\Codex Web GPT\n"
+    "    InstallLocation    REG_SZ    D:\\Installed\\COS Workbench\n"
   ) as unknown as typeof childProcess.execFileSync);
   Object.defineProperty(process, "platform", { ...platform, value: "win32" });
   try {
     expect(installedLauncherCandidates({
       platform: "win32",
       environment: { LOCALAPPDATA: "C:\\Fixture\\AppData\\Local" },
-    })).toEqual(["C:\\Fixture\\AppData\\Local\\Programs\\Codex Web GPT\\Codex Web GPT.exe"]);
+    })).toEqual(["C:\\Fixture\\AppData\\Local\\Programs\\COS Workbench\\COS Workbench.exe"]);
     expect(registry).not.toHaveBeenCalled();
     expect(installedLauncherCandidates({ platform: "win32", environment: process.env }))
-      .toEqual(["D:\\Installed\\Codex Web GPT\\Codex Web GPT.exe"]);
+      .toEqual(["D:\\Installed\\COS Workbench\\COS Workbench.exe"]);
     expect(registry).toHaveBeenCalledTimes(1);
     expect(installedLauncherCandidates({
       platform: "win32", environment: {}, windowsInstallLocation: "E:\\Explicit",
-    })).toEqual(["E:\\Explicit\\Codex Web GPT.exe"]);
+    })).toEqual(["E:\\Explicit\\COS Workbench.exe"]);
     expect(registry).toHaveBeenCalledTimes(1);
   } finally {
     Object.defineProperty(process, "platform", platform);

@@ -8,8 +8,6 @@ const DEFAULT_STATE = Object.freeze({
   version: 1,
   language: null,
   onboardingComplete: false,
-  githubOpened: false,
-  xOpened: false,
   autoStart: true,
   keepRunningOnClose: true,
   showBrowserDuringTurns: true,
@@ -40,8 +38,6 @@ function readState(filePath) {
     }
     for (const key of [
       "onboardingComplete",
-      "githubOpened",
-      "xOpened",
       "autoStart",
       "keepRunningOnClose",
       "showBrowserDuringTurns",

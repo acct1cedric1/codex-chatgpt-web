@@ -311,7 +311,7 @@ class BrowserHost {
     helper,
     logger,
     loginWithPasskey,
-    partition = "persist:codex-web-gpt-chatgpt",
+    partition = "persist:cos-workbench-chatgpt",
     profile = "production",
     publishState,
     showWindow = () => {},
@@ -337,8 +337,8 @@ class BrowserHost {
       throw new Error("Browser host profile is invalid");
     }
     const expectedPartition = profile === "development"
-      ? "persist:codex-web-gpt-dev-chatgpt"
-      : "persist:codex-web-gpt-chatgpt";
+      ? "persist:cos-workbench-dev-chatgpt"
+      : "persist:cos-workbench-chatgpt";
     if (partition !== expectedPartition) throw new Error("Browser host partition does not match its profile");
     this.partition = partition;
     this.profile = profile;
@@ -2233,9 +2233,16 @@ class BrowserHost {
     if (retainedMatches.length > 1) {
       throw new Error(`ChatGPT retained conversation ${conversationKey} owns multiple browser tabs`);
     }
-    const exactRetained = retainedMatches[0];
+    let exactRetained = retainedMatches[0];
     if (sameTrace?.status === "ready" && sameTrace !== exactRetained) {
       throw new Error(`ChatGPT browser turn ${traceId} is retained under different conversation metadata`);
+    }
+    // ChatGPT no longer exposes app selection after the first Temporary Chat message.
+    // Ordinary tool turns need a fresh document and the complete native context. Keep
+    // retained reuse only for the explicit compaction handoff to its existing connector.
+    if (exactRetained && connectorIdentity && !requireRetainedConversation) {
+      this.removeTurnTab(exactRetained, false);
+      exactRetained = undefined;
     }
     const existing = sameTrace?.status === "running" ? sameTrace : exactRetained;
     if (existing) {
@@ -2677,6 +2684,9 @@ class BrowserHost {
         this.closeAuthView(this.authView, true, false);
       }
       const wasAuthenticated = this.state.authenticated;
+      // Commit the owned session before reporting sign-in as complete. A parent process
+      // can exit before the normal launcher shutdown gets a chance to flush Chromium.
+      if (!wasAuthenticated) await this.persistSession();
       const availability = this.activeTraceId
         ? { status: "running", message: "ChatGPT is working" }
         : this.manualOperation

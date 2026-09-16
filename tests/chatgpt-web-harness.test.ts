@@ -2,12 +2,12 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { buildResponseJSON } from "../src/bridge";
 import { ChatGptWebAdapterError, chatGptStoppedThinkingError } from "../src/adapters/chatgpt-web/adapter-error";
-import { ChatGptCompletionTracker, chatGptImageFilePayloads, chatGptPromptFilePayloads, chatGptTurnIsComplete } from "../src/adapters/chatgpt-web/browser-worker";
+import { ChatGptCompletionTracker, chatGptImageFilePayloads, chatGptNewTurnIdentity, chatGptPromptFilePayloads, chatGptTurnIsComplete } from "../src/adapters/chatgpt-web/browser-worker";
 import { ChatGptBrowserWorker, type BrowserTurn } from "../src/adapters/chatgpt-web/browser-worker";
 import { chatGptConversationKey } from "../src/adapters/chatgpt-web/conversation-key";
 import { CHATGPT_TURN_REVISION_CONFLICT_MESSAGE, extractChatGptTurnEnvironment, extractChatGptTurnIdentity, extractChatGptTurnUserRevision, priorChatGptAbortedTurnIds } from "../src/adapters/chatgpt-web/environment";
@@ -368,7 +368,7 @@ describe("ChatGPT outer-native harness v4", () => {
     }
   });
 
-  test("keeps sequential native messages in one retained MCP conversation until compaction", async () => {
+  test("fresh Full-mode follow-ups preserve native history and the compaction identity", async () => {
     const socketPath = brokerTestEndpoint(`cgw-retained-messages-${process.pid}-${Date.now()}`);
     const provider: CodexProviderConfig = {
       adapter: "chatgpt-web",
@@ -389,7 +389,7 @@ describe("ChatGPT outer-native harness v4", () => {
     const tokens: string[] = [];
     let browserMessages = 0;
     (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = async turn => {
-      const prepared = browserMessages === 0 ? await turn.prepare() : await turn.prepareResume!();
+      const prepared = await turn.prepare();
       preparedPrompts.push(prepared.text);
       conversationKeys.push(turn.conversationKey!);
       const token = prepared.text.match(/turn_token (turn_[A-Za-z0-9_-]+)/)?.[1];
@@ -445,7 +445,8 @@ describe("ChatGPT outer-native harness v4", () => {
       expect(tokens[1]).not.toBe(tokens[0]);
       expect(preparedPrompts[0]).toContain("Inspect the project");
       expect(preparedPrompts[1]).toContain("Continue in the same repository");
-      expect(preparedPrompts[1]).not.toContain("First retained answer");
+      expect(preparedPrompts[1]).toContain("First retained answer");
+      expect(preparedPrompts[1]).toContain("Inspect the project");
       expect(preparedPrompts[1]).not.toContain(environmentXml);
     } finally {
       (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = originalRun;
@@ -939,7 +940,7 @@ describe("ChatGPT outer-native harness v4", () => {
       "new-trace", undefined, "native-turn", "native-thread", chatGptInstructionLineage(steered));
     expect(cancellations).toHaveLength(1);
     expect(starts).toBe(0);
-    expect(sessions.cancelledError("old-trace")).toMatchObject({ code: "client_cancelled" });
+    expect(sessions.terminalError("old-trace")).toMatchObject({ code: "client_cancelled" });
     cleanup();
     const current = await next;
     expect(starts).toBe(1);
@@ -1009,7 +1010,8 @@ describe("ChatGPT outer-native harness v4", () => {
     const provider: CodexProviderConfig = {
       adapter: "chatgpt-web",
       baseUrl: "browser://chatgpt-abort-retry-test",
-      chatgptWeb: { brokerSocketPath: socketPath, localToolsEnabled: false, solAvailable: true, proAvailable: true },
+      chatgptWeb: { brokerSocketPath: socketPath, localToolsEnabled: false, solAvailable: true, proAvailable: true,
+        threadEnvironmentStatePath: join(tempRoot, "reconnect", "thread-environments.json") },
     };
     const worker = ChatGptBrowserWorker.forProvider(provider);
     const originalRun = worker.run.bind(worker);
@@ -1052,6 +1054,9 @@ describe("ChatGPT outer-native harness v4", () => {
       finishBrowser();
       await reconnect;
       expect(browserStarts).toBe(1);
+      const receipts = JSON.parse(readFileSync(join(tempRoot, "reconnect", "task-records.json"), "utf8"));
+      expect(receipts.records).toHaveLength(1);
+      expect(receipts.records[0].state).toBe("answer_returned");
       expect(events.filter((event): event is Extract<AdapterEvent, { type: "text_delta" }> => (
         event.type === "text_delta" && event.phase === "final_answer"
       ))
@@ -1159,6 +1164,36 @@ describe("ChatGPT outer-native harness v4", () => {
     }
   });
 
+  test("a submitted response identity failure preserves its cause without replaying the task", async () => {
+    const provider: CodexProviderConfig = {
+      adapter: "chatgpt-web", baseUrl: `browser://identity-failure-${Date.now()}`,
+      chatgptWeb: { localToolsEnabled: false, solAvailable: true, proAvailable: true },
+    };
+    const worker = ChatGptBrowserWorker.forProvider(provider);
+    const originalRun = worker.run.bind(worker);
+    let starts = 0;
+    worker.run = async turn => {
+      starts += 1;
+      turn.onSubmitted?.();
+      chatGptNewTurnIdentity([], ["candidate-one", "candidate-two"]);
+      throw new Error("unreachable");
+    };
+    try {
+      const adapter = createChatGptWebAdapter(provider);
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const events: AdapterEvent[] = [];
+        await adapter.runTurn!(rawWireRequest(environmentXml), { headers: new Headers() }, event => events.push(event));
+        expect(events.at(-1)).toMatchObject({
+          type: "error", code: "chatgpt_turn_identity_ambiguous", retryable: false,
+          message: "ChatGPT exposed 2 new conversation turns for one submitted message. Workbench could not identify the response safely.",
+        });
+      }
+      expect(starts).toBe(1);
+    } finally {
+      worker.run = originalRun;
+    }
+  });
+
   test("an unclassified browser failure retires its session before the next native retry", async () => {
     const socketPath = brokerTestEndpoint(`cgw-h4-error-retry-${process.pid}-${Date.now()}`);
     const provider: CodexProviderConfig = {
@@ -1235,14 +1270,16 @@ describe("ChatGPT outer-native harness v4", () => {
     const provider: CodexProviderConfig = {
       adapter: "chatgpt-web",
       baseUrl: `browser://chatgpt-retry-budget-${Date.now()}`,
-      chatgptWeb: { brokerSocketPath: socketPath, localToolsEnabled: false, solAvailable: true, proAvailable: true },
+      chatgptWeb: {
+        brokerSocketPath: socketPath, localToolsEnabled: false, solAvailable: true, proAvailable: true,
+        threadEnvironmentStatePath: join(tempRoot, "unsubmitted-retry", "environment.json"),
+      },
     };
     const worker = ChatGptBrowserWorker.forProvider(provider);
     const originalRun = worker.run.bind(worker);
     let browserStarts = 0;
     (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = async turn => {
       browserStarts += 1;
-      turn.onSendActivated?.();
       throw new ChatGptWebAdapterError("ChatGPT rate limit: too many requests. Try again in a few minutes.", {
         status: 429,
         errorType: "rate_limit_error",
@@ -1270,6 +1307,44 @@ describe("ChatGPT outer-native harness v4", () => {
       expect(browserStarts).toBe(MAX_CHATGPT_WEB_TURN_RETRIES + 1);
     } finally {
       (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = originalRun;
+      await TurnBroker.forSocket(socketPath).close();
+    }
+  });
+
+  test("a submitted upstream failure keeps its original error across native reconnects with durable receipts", async () => {
+    const socketPath = brokerTestEndpoint(`cgw-submitted-receipt-${process.pid}-${Date.now()}`);
+    const provider: CodexProviderConfig = {
+      adapter: "chatgpt-web", baseUrl: `browser://submitted-receipt-${Date.now()}`,
+      chatgptWeb: {
+        brokerSocketPath: socketPath, localToolsEnabled: false, solAvailable: true, proAvailable: true,
+        threadEnvironmentStatePath: join(tempRoot, "submitted-receipt", "environment.json"),
+      },
+    };
+    const worker = ChatGptBrowserWorker.forProvider(provider);
+    const originalRun = worker.run.bind(worker);
+    let starts = 0;
+    worker.run = async turn => {
+      starts++;
+      turn.onSendActivated?.();
+      turn.onSubmitted?.();
+      throw new ChatGptWebAdapterError("ChatGPT response failed upstream", {
+        status: 502, errorType: "server_error", code: "upstream_server_error", retryable: true,
+      });
+    };
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const events: AdapterEvent[] = [];
+        await createChatGptWebAdapter(provider).runTurn!(
+          rawWireRequest(environmentXml), { headers: new Headers() }, event => events.push(event),
+        );
+        expect(events.at(-1)).toMatchObject({
+          type: "error", message: "ChatGPT response failed upstream",
+          code: "upstream_server_error", retryable: false,
+        });
+      }
+      expect(starts).toBe(1);
+    } finally {
+      worker.run = originalRun;
       await TurnBroker.forSocket(socketPath).close();
     }
   });
@@ -2166,7 +2241,8 @@ describe("ChatGPT outer-native harness v4", () => {
     const provider: CodexProviderConfig = {
       adapter: "chatgpt-web",
       baseUrl: "browser://chatgpt-usage-test",
-      chatgptWeb: { brokerSocketPath: socketPath, turnTimeoutMs: 30_000, localToolsEnabled: true, solAvailable: true, proAvailable: true },
+      chatgptWeb: { brokerSocketPath: socketPath, turnTimeoutMs: 30_000, localToolsEnabled: true, solAvailable: true, proAvailable: true,
+        threadEnvironmentStatePath: join(tempRoot, "tool-receipts", "thread-environments.json") },
     };
     const worker = ChatGptBrowserWorker.forProvider(provider);
     const originalRun = worker.run.bind(worker);
@@ -2248,6 +2324,12 @@ describe("ChatGPT outer-native harness v4", () => {
       expect(finalDone).toMatchObject({ type: "done", stopReason: "stop", endTurn: true });
       expect(finalDone.usage!.inputTokens).toBeGreaterThan(95_000);
       expect(finalDone.usage!.inputTokens).toBeGreaterThan(firstDone.usage!.inputTokens + 50_000);
+      const receiptText = readFileSync(join(tempRoot, "tool-receipts", "task-records.json"), "utf8");
+      const receipt = JSON.parse(receiptText).records[0];
+      expect(receipt.state).toBe("answer_returned");
+      expect(receipt.tools).toEqual([{id: call!.id, name: "exec_command", state: "returned", exitCode: 0}]);
+      expect(receiptText).not.toContain("collect-large-evidence");
+      expect(receiptText).not.toContain("abcdefghij0123456789");
     } finally {
       (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = originalRun;
       await TurnBroker.forSocket(socketPath).close();
@@ -2260,6 +2342,7 @@ describe("ChatGPT outer-native harness v4", () => {
       adapter: "chatgpt-web",
       baseUrl: `browser://chatgpt-active-compact-${Date.now()}`,
       chatgptWeb: {
+        threadEnvironmentStatePath: join(tempRoot, "compaction-receipts", "environment.json"),
         browserHost: "launcher",
         browserHostDescriptorPath: join(tempRoot, "active-compact-launcher.json"),
         brokerSocketPath: socketPath,
@@ -2411,6 +2494,10 @@ describe("ChatGPT outer-native harness v4", () => {
       expect(originalBrowserReceivedToolResult).toBe(true);
       expect(retainedCompactionMessages).toBe(1);
       expect(browserStarts).toBe(2);
+
+      const receipt = JSON.parse(readFileSync(join(tempRoot, "compaction-receipts", "task-records.json"), "utf8")).records[0];
+      expect(receipt.state).toBe("answer_returned");
+      expect(receipt.tools).toEqual([{ id: callStart!.id, name: "exec_command", state: "returned", exitCode: 0 }]);
 
       const compactReplayEvents: AdapterEvent[] = [];
       await adapter.runTurn!(

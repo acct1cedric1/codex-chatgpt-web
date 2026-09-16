@@ -5,6 +5,7 @@ const { spawnSync } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 const {
   app,
+  clipboard,
   BrowserWindow,
   dialog,
   ipcMain,
@@ -30,6 +31,7 @@ const { RuntimeSupervisor } = require("./runtime-supervisor.cjs");
 const { DEVELOPMENT_PROFILE, resolveLauncherProfile } = require("./profile.cjs");
 const { runtimeBundlePaths } = require("./runtime-command.cjs");
 const { createUpdateController } = require("./update.cjs");
+const { readTaskHistory, recoveryBrief } = require("./task-history.cjs");
 const {
   createStateStore,
   nextSessionRefreshReminderAt,
@@ -50,12 +52,11 @@ const BROWSER_DESCRIPTOR_PATH = path.join(CORE_HOME, "runtime", "launcher-browse
 const BROWSER_HELPER_PATH = app.isPackaged
   ? path.join(process.resourcesPath, "runtime", "app", "browser-helper.cjs")
   : path.join(SOURCE_ROOT, ".launcher-runtime", "browser-helper.cjs");
-const GITHUB_URL = "https://github.com/miuuyy/codex-chatgpt-web";
-const X_URL = "https://x.com/miu21590";
+const GITHUB_URL = "https://github.com/acct1cedric1/codex-chatgpt-web";
 const CONNECTORS_URL = "https://chatgpt.com/#settings/Plugins";
 const TUNNELS_URL = "https://platform.openai.com/settings/organization/tunnels";
 const KEYS_URL = "https://platform.openai.com/settings/organization/api-keys";
-const ALLOWED_EXTERNAL_URLS = new Set([GITHUB_URL, X_URL, CONNECTORS_URL, TUNNELS_URL, KEYS_URL]);
+const ALLOWED_EXTERNAL_URLS = new Set([GITHUB_URL, CONNECTORS_URL, TUNNELS_URL, KEYS_URL]);
 const PACKAGED_RENDERER_URL = pathToFileURL(path.join(__dirname, "..", "dist", "index.html")).href;
 const APP_ICON_PATH = path.join(__dirname, "..", "assets", "icon.png");
 
@@ -63,7 +64,7 @@ process.env.CODEX_CHATGPT_WEB_HOME = CORE_HOME;
 process.env.CODEX_HOME = LAUNCHER_PROFILE.codexHome;
 app.setName(LAUNCHER_PROFILE.displayName);
 if (process.platform === "win32") {
-  app.setAppUserModelId(IS_DEV_PROFILE ? "dev.codexwebgpt.launcher.dev" : "dev.codexwebgpt.launcher");
+  app.setAppUserModelId(IS_DEV_PROFILE ? "dev.cos.workbench.dev" : "dev.cos.workbench");
 }
 const launcherUserData = LAUNCHER_PROFILE.userData;
 fs.mkdirSync(launcherUserData, { recursive: true, mode: 0o700 });
@@ -192,32 +193,32 @@ function trayImage() {
 
 const NATIVE_COPY = Object.freeze({
   en: Object.freeze({
-    openLauncher: "Open Codex Web GPT",
+    openLauncher: "Open COS Workbench",
     quit: "Quit",
     exportDiagnostics: "Export privacy-safe diagnostics",
     cancel: "Cancel",
     remove: "Remove",
-    removeTitle: "Remove Codex Web GPT",
+    removeTitle: "Remove COS Workbench",
     removeMessage: "Remove the ChatGPT Web models from Codex and restore the previous model route?",
     removeDetail: "The launcher's ChatGPT login profile will be preserved. Codex must be restarted once.",
   }),
   "zh-CN": Object.freeze({
-    openLauncher: "打开 Codex Web GPT",
+    openLauncher: "打开 COS Workbench",
     quit: "退出",
     exportDiagnostics: "导出隐私安全诊断",
     cancel: "取消",
     remove: "移除",
-    removeTitle: "移除 Codex Web GPT",
+    removeTitle: "移除 COS Workbench",
     removeMessage: "从 Codex 中移除 ChatGPT Web 模型并恢复此前的模型路由？",
     removeDetail: "启动器中的 ChatGPT 登录 profile 会保留。Codex 需要重启一次。",
   }),
   ja: Object.freeze({
-    openLauncher: "Codex Web GPT を開く",
+    openLauncher: "COS Workbench を開く",
     quit: "終了",
     exportDiagnostics: "プライバシー保護済みの診断情報をエクスポート",
     cancel: "キャンセル",
     remove: "削除",
-    removeTitle: "Codex Web GPT を削除",
+    removeTitle: "COS Workbench を削除",
     removeMessage: "Codex から ChatGPT Web モデルを削除し、以前のモデルルートを復元しますか？",
     removeDetail: "ランチャーの ChatGPT ログインプロファイルは保持されます。Codex を一度再起動する必要があります。",
   }),
@@ -422,6 +423,11 @@ function smokePassedForCurrentVersion(state) {
 
 function registerIpc({ logger, stateStore }) {
   const handle = (channel, handler) => registerLoggedIpc(ipcMain, logger, channel, handler);
+  handle("launcher:task-history", () => readTaskHistory(CORE_HOME));
+  handle("launcher:copy-task-recovery", (_event, traceId) => {
+    clipboard.writeText(recoveryBrief(CORE_HOME, traceId));
+    return true;
+  });
   handle("launcher:snapshot", async () => ({
     profile: LAUNCHER_PROFILE.kind,
     profilePaths: {
@@ -438,7 +444,7 @@ function registerIpc({ logger, stateStore }) {
     },
     mcpCredentialsConfigured: runtimeHost?.mcpCredentialsConfigured() ?? false,
     logs: logger.recent(),
-    urls: { github: GITHUB_URL, x: X_URL, connectors: CONNECTORS_URL, tunnels: TUNNELS_URL, keys: KEYS_URL },
+    urls: { github: GITHUB_URL, connectors: CONNECTORS_URL, tunnels: TUNNELS_URL, keys: KEYS_URL },
     platform: process.platform,
     packaged: app.isPackaged,
     version: app.getVersion(),
@@ -452,16 +458,8 @@ function registerIpc({ logger, stateStore }) {
     updateTrayMenu(state.language);
     return state;
   });
-  handle("launcher:open-social", async (_event, target) => {
-    const url = target === "github" ? GITHUB_URL : target === "x" ? X_URL : null;
-    if (!url) throw new Error("Unknown social target");
-    await openWebUrl(url);
-    const patch = target === "github" ? { githubOpened: true } : { xOpened: true };
-    return stateStore.update(patch);
-  });
   handle("launcher:complete-onboarding", (_event, language, rawInteractionMode) => {
     const current = stateStore.read();
-    if (!current.githubOpened || !current.xOpened) throw new Error("Open the GitHub and X pages before continuing");
     if (current.autoStart) setAutostart(app, true);
     const next = stateStore.update({
       language: validateLanguage(language),
@@ -831,7 +829,7 @@ function registerIpc({ logger, stateStore }) {
     const copy = nativeCopyFor(stateStore.read().language);
     const result = await dialog.showSaveDialog(mainWindow, {
       title: copy.exportDiagnostics,
-      defaultPath: path.join(app.getPath("documents"), `codex-web-gpt-diagnostics-${date}.jsonl`),
+      defaultPath: path.join(app.getPath("documents"), `cos-workbench-diagnostics-${date}.jsonl`),
       filters: [{ name: "JSON Lines", extensions: ["jsonl"] }],
     });
     if (result.canceled || !result.filePath) return null;
@@ -873,7 +871,7 @@ async function requestQuit() {
   try {
     const activeOperation = runtimeHost?.currentOperation() || browserHost?.currentOperation();
     if (activeOperation) {
-      throw new Error(`Wait for ${activeOperation} to finish before quitting Codex Web GPT`);
+      throw new Error(`Wait for ${activeOperation} to finish before quitting COS Workbench`);
     }
     await runtimeSupervisor?.shutdown({ cancelActiveTurns: true, force: true });
     stopCatalogVerificationMonitor();
@@ -923,7 +921,7 @@ async function start() {
 
   cdpPort = await findFreePort();
   if (process.platform === "linux") {
-    app.commandLine.appendSwitch("class", IS_DEV_PROFILE ? "codex-web-gpt-dev" : "codex-web-gpt");
+    app.commandLine.appendSwitch("class", IS_DEV_PROFILE ? "cos-workbench-dev" : "codex-web-gpt");
   }
   app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
   app.commandLine.appendSwitch("remote-debugging-port", String(cdpPort));
@@ -1216,7 +1214,7 @@ async function start() {
     if (runtime.status === "external" || runtime.status === "needs-setup") {
       const detail = runtime.detail || (
         runtime.status === "external"
-          ? "Another process owns the configured Codex Web GPT runtime"
+          ? "Another process owns the configured COS Workbench runtime"
           : "The installed runtime configuration must be repaired from Setup"
       );
       publishOperation({
@@ -1259,7 +1257,7 @@ void start().catch((error) => {
     fs.appendFileSync(path.join(app.getPath("logs"), "launcher-fatal.log"), `${new Date().toISOString()} ${error?.stack || error}\n`);
   } catch {}
   try {
-    dialog.showErrorBox("Codex Web GPT could not start", message);
+    dialog.showErrorBox("COS Workbench could not start", message);
   } catch {}
   app.exit(1);
 });

@@ -6,9 +6,9 @@ const path = require("node:path");
 const { spawn, spawnSync } = require("node:child_process");
 const { pipeline } = require("node:stream/promises");
 
-const REPOSITORY = "miuuyy/codex-chatgpt-web";
+const REPOSITORY = "acct1cedric1/codex-chatgpt-web";
 const RELEASE_API_URL = `https://api.github.com/repos/${REPOSITORY}/releases/latest`;
-const USER_AGENT = "codex-web-gpt-launcher-updater";
+const USER_AGENT = "cos-workbench-launcher-updater";
 const MAX_REDIRECTS = 5;
 
 function parseVersion(value) {
@@ -43,13 +43,13 @@ function releaseVersion(tagName) {
 
 function releaseAssetName(version, platform = process.platform, arch = process.arch) {
   if (platform === "darwin" && ["arm64", "x64"].includes(arch)) {
-    return `codex-web-gpt-${version}-mac-${arch}.zip`;
+    return `cos-workbench-${version}-mac-${arch}.zip`;
   }
   if (platform === "win32" && arch === "x64") {
-    return `codex-web-gpt-${version}-win-x64.exe`;
+    return `cos-workbench-${version}-win-x64.exe`;
   }
   if (platform === "linux" && arch === "x64") {
-    return `codex-web-gpt-${version}-linux-x64.AppImage`;
+    return `cos-workbench-${version}-linux-x64.AppImage`;
   }
   return null;
 }
@@ -96,7 +96,7 @@ function request(url, redirects = 0) {
       }
       if (response.statusCode !== 200) {
         response.resume();
-        reject(new Error(`Update download failed with HTTP ${response.statusCode}`));
+        reject(Object.assign(new Error(`Update download failed with HTTP ${response.statusCode}`), { status: response.statusCode, url }));
         return;
       }
       resolve(response);
@@ -150,7 +150,7 @@ function findMacApplication(root) {
   const appEntry = entries.find((entry) => entry.isDirectory() && entry.name.endsWith(".app"));
   if (!appEntry) throw new Error("The macOS update archive does not contain an application bundle");
   const application = path.join(root, appEntry.name);
-  const executable = path.join(application, "Contents", "MacOS", "Codex Web GPT");
+  const executable = path.join(application, "Contents", "MacOS", "COS Workbench");
   if (!fs.existsSync(executable) || !fs.statSync(executable).isFile()) {
     throw new Error("The macOS update archive is incomplete");
   }
@@ -297,6 +297,7 @@ function createUpdateController({
       logger?.info("launcher.update_available", { currentVersion, version, platform, arch });
       return transition({ status: "available", version });
     } catch (error) {
+      if (error.status === 404 && error.url === RELEASE_API_URL) return transition({ status: "idle" });
       const message = error instanceof Error ? error.message : String(error);
       logger?.warn("launcher.update_check_failed", { message });
       return transition({ status: "error", message });
@@ -309,7 +310,7 @@ function createUpdateController({
     const available = candidate;
     pending = (async () => {
       transition({ status: "downloading", version: available.version });
-      const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-update-"));
+      const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cos-workbench-update-"));
       try {
         const checksums = await deps.downloadText(available.checksumsUrl);
         const expected = expectedChecksum(checksums, available.assetName);

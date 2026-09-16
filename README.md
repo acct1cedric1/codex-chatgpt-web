@@ -1,246 +1,50 @@
-<h1 align="center">ChatGPT Web for Codex</h1>
+# COS Workbench
 
-<p align="center">
-  <strong>Use ChatGPT Web (including Pro) as native Codex models.</strong><br>
-  Change the model tier, save your workflow.
-</p>
+COS Workbench is our Windows desktop fork of codex-chatgpt-web. It connects a signed-in ChatGPT web session to native Codex task execution.
 
-<p align="center">
-  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a>
-</p>
+[English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md)
 
-<p align="center">
-  <a href="TROUBLESHOOTING.md">Troubleshooting</a> · <a href="SECURITY.md">Security</a> · <a href="CONTRIBUTING.md">Contributing</a>
-</p>
+Version 5.1 adds cumulative checkpoint retention, durable tool receipts, restart review, a Windows broker fix, and direct setup without a social-link gate. The app uses its own data directory and icon. Codex still owns execution, approvals and terminal sessions.
 
-<p align="center">
-  <a href="https://github.com/miuuyy/codex-chatgpt-web/actions/workflows/ci.yml"><img src="https://github.com/miuuyy/codex-chatgpt-web/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
-  <img src="https://img.shields.io/badge/macOS-arm64%20%7C%20x64-black?logo=apple" alt="macOS arm64 and x64">
-  <img src="https://img.shields.io/badge/Windows-x64-0078d4?logo=windows11" alt="Windows x64">
-  <img src="https://img.shields.io/badge/Linux-x64-fcc624?logo=linux&logoColor=black" alt="Linux x64">
-  <img src="https://img.shields.io/badge/Free_AI-no_API_fees-10a37f" alt="Free AI with no API fees">
-</p>
+Version 5.1.4 binds each response to its submitted user message, so an older staging reply that changes its DOM identity does not break current-response tracking. Ambiguous response errors keep their actual reason in Codex. Normal Full-mode turns open a fresh tool-enabled chat with the complete native context. Explicit compaction handoffs still use their source chat. Native text exit codes and final-verification instructions remain in place. See [fork status](docs/fork-status.md) for validation and limits.
 
-Free and Go accounts get **ChatGPT Web — Luna** in Codex's native model picker. Accounts that
-expose the reasoning selector keep **Instant**, **Medium**, **High**, **Extra High**, and **Pro** as
-their subscription allows. The bridge sends the current compiled Codex task context to a fresh
-ChatGPT Temporary Chat, attaches images, and streams visible reasoning, tool activity, and Markdown
-back into the same Codex task.
+This is an unofficial integration. It needs your own ChatGPT sign-in and available account features. Browser changes and service limits still apply. It does not bypass approvals or service refusals. A returned tool result does not prove a task succeeded.
 
-<p align="center">
-  <img src="assets/demo.gif" alt="A live ChatGPT Web turn using the native Codex harness" width="960">
-</p>
+## Local Windows build
 
-```text
-Codex task ──Responses + SSE──▶ codex-chatgpt-web ──embedded browser──▶ ChatGPT
-     ▲                                │                                      │
-     └──────── native UI, context, images, tracing, and tool lifecycle ──────┘
-```
-
-Codex keeps the native task, context lifecycle, UI, and tool harness. The local Responses bridge
-routes only the selected model task through a task-bound ChatGPT Temporary Chat; in full mode, MCP
-connects ChatGPT back to the tools of that same Codex task until its next compaction boundary.
-
-> [!TIP]
-> I also built **[ChatGPT Persona Voice](https://github.com/miuuyy/ChatGPT-Persona-Voice)**, a local
-> app that changes the ChatGPT/Codex voice in near real time. It never touches your account, browser
-> session, or ChatGPT requests, so using it carries no account-blocking risk. If you like my work,
-> give it a try.
-
-## Highlights
-
-- **Native Codex models.** ChatGPT Web runs from Codex's model picker while the original task UI,
-  context lifecycle, streaming, tracing, and tool presentation stay intact.
-- **The full Codex harness over MCP.** Full mode gives every effort exposed by the signed-in account,
-  including Pro, the active task's filesystem, shell, images, approvals, and configured tools/apps.
-- **Continuous task sessions and native compaction.** Sequential messages reuse one task-bound
-  Temporary Chat. At the context boundary, the retained agent writes the checkpoint before Codex
-  starts a clean chat; if that chat was closed, canonical Codex history supplies the fallback.
-- **One cross-platform launcher.** The macOS, Windows, and Linux app owns sign-in, model setup, MCP
-  guidance, health checks, safe diagnostics, and up to five visible task-bound browser tabs.
-- **Fail-closed behavior.** Missing models, tools, or changed ChatGPT UI produce explicit errors
-  instead of silently switching route or capability. End-to-end coverage is documented in
-  [release validation](docs/release-validation.md).
-
-Temporary Chat is a ChatGPT privacy mode, not anonymity or local-only inference: prompts are still
-processed by OpenAI and are subject to the account's settings and OpenAI's
-[Temporary Chat policy](https://help.openai.com/en/articles/8914046-temporary-chat-faq). This project
-is unofficial; users remain responsible for complying with applicable OpenAI terms and workspace
-policies.
-
-## Quick start
-
-Install or update the desktop launcher. To update or repair an existing installation, quit the
-launcher and run the same command again; it replaces the application and embedded runtime while
-preserving the ChatGPT profile and launcher configuration.
-
-**macOS or Linux**
-
-```bash
-curl -fsSL https://github.com/miuuyy/codex-chatgpt-web/releases/latest/download/install-launcher.sh | sh
-```
-
-**Windows PowerShell**
+Development requires Bun 1.4.0. Install Node.js and Git as well. The packaged app includes its own runtime.
 
 ```powershell
-irm https://github.com/miuuyy/codex-chatgpt-web/releases/latest/download/install-launcher.ps1 | iex
+git clone https://github.com/acct1cedric1/codex-chatgpt-web.git
+cd codex-chatgpt-web
+git switch codex/cos-direction
+bun install --frozen-lockfile
+bun install --cwd launcher --frozen-lockfile
+bun run --cwd launcher package:win
 ```
 
-Then complete the three checks in the app:
+Run the generated installer in `launcher/artifacts`. Open COS Workbench. Choose English and Automatic interaction. Sign in through the app. Complete its connection test before installing the Codex route. Route installation changes native Codex configuration and can require a Codex restart. Keep the current app until this account passes a real task test.
 
-1. Sign in directly in the launcher's embedded ChatGPT browser. Login pages and identity-provider
-   windows stay inside the same launcher-owned private browser profile; no session is copied between
-   browsers.
-2. Run the browser smoke test.
-3. Press **Install models**, restart Codex once, and select a **ChatGPT Web — …** model.
+## Connect local tools through MCP
 
-The launcher detects the current account's ChatGPT controls during setup: Free/Go accounts expose
-only Luna, while Pro appears only when the signed-in account exposes it. The separate **MCP** page
-is optional and guides the full-harness setup without terminal commands.
+1. In Workbench, open **MCP**. Create a separate OpenAI tunnel for your ChatGPT workspace and a regular API key with only **Tunnels Read + Use** permissions.
+2. Under **Connect the local harness**, enter the tunnel ID and key. Click **Connect harness** and wait for the tunnel to become ready.
+3. In ChatGPT, enable Developer mode and open **Plugins → Create app**. Use the exact name **Codex Native2**, choose **Tunnel**, select the Workbench tunnel, and select **No Auth**. Access is controlled by the tunnel and the active Codex turn capability.
+4. Create and connect the app. In its permissions, select **Allow all actions**. This permits command and patch calls to reach the outer Codex harness, which still enforces its own approvals and sandbox.
+5. Return to Workbench and click **Verify runtime**. All three setup steps must show completion.
 
-The packaged launcher keeps sign-in and ChatGPT model turns in its embedded browser. It needs no
-model API key, installed Chrome/Chromium, system Node/Bun, or project-managed browser download.
+Keep COS Workbench open. In Codex, select a **ChatGPT Web** model and start a normal task. Workbench attaches the connector automatically. Start with a read-only request, such as listing the project files. Available tools come from the active Codex task; this setup does not guarantee that every optional tool, including desktop control, is available.
 
-**Run from source**
+The current installation routes normal OpenAI models through Workbench as well. Exiting Workbench can interrupt those models until the direct Codex route is restored. The separate legacy Chat On Steroids app is needed only for its own connectors and recording features.
 
-```bash
-git clone https://github.com/miuuyy/codex-chatgpt-web.git && \
-cd codex-chatgpt-web && \
-bun run app
-```
+Never commit tunnel IDs, runtime keys, browser sessions, or local configuration. MCP setup, connector discovery, and a Full-mode Pro two-turn native tool check have been verified on Windows 5.1.3. Desktop control and other optional tools remain account- and task-dependent.
 
-This source path requires Bun 1.4.0. The command installs locked dependencies and opens the app.
+## Task recovery
 
-## Modes
+Open Activity to inspect recent task records. The store retains up to 200 turns and 64 tool receipts per turn. It records native task and turn IDs, tool names, explicit errors and observed exit codes. It stores no prompt, tool argument or output content. A stopped process marks incomplete calls as unknown. The recorded turn cannot silently restart; inspect native task history and the workspace, then send a new message. The recovery brief copies these instructions and receipt metadata. It never sends or executes them.
 
-| Mode | Models | Local Codex tools | Extra setup |
-| --- | --- | --- | --- |
-| **Browser-only** | Free/Go: Luna; Plus: Instant–High; Pro: adds Extra High and Pro | No; Codex shows a warning | None |
-| **Full harness (With Automation)** | Free/Go: Luna; Plus: Instant–High; Pro: adds Extra High and Pro | Yes for every listed effort, including Pro | OpenAI tunnel + ChatGPT connector |
-| **Zero Risk** | Choose the ChatGPT model and effort manually; optional Pro-sized context | Yes; the full turn-bound Codex harness remains available | Separate OpenAI tunnel + `Codex Zero Risk` connector; paste and send manually |
+## Project
 
-Each automatic picker entry has one fixed ChatGPT mode. Codex still displays its built-in Effort and
-Speed rows, but changing them cannot silently change the selected browser model. In automatic Full
-mode every available effort receives the same turn-bound MCP capability. Pro has no separate
-restriction or reduced tool contract.
+See [fork status](docs/fork-status.md), [architecture](docs/architecture.md), [troubleshooting](TROUBLESHOOTING.md), and the [MIT license](LICENSE).
 
-Zero Risk keeps the local Responses bridge and full Codex harness, but never reads or changes the
-ChatGPT page and never sends a prompt for you. The launcher prepares and copies the prompt; you
-choose the model, effort, and `Codex Zero Risk` connector, then paste and send it yourself. This
-removes the account risk specifically associated with ChatGPT web automation.
-
-## Full harness
-
-Full mode connects ChatGPT's tool calls back to the current Codex task through the official
-[OpenAI tunnel-client](https://github.com/openai/tunnel-client). The tunnel is outbound: it does
-not expose a public IP, open an inbound port, or require router forwarding.
-
-The launcher's **MCP** page guides the complete setup. For the exact clicks, see the
-[video walkthroughs](TROUBLESHOOTING.md).
-
-> **Limits**
->
-> See [Limits](https://github.com/miuuyy/codex-chatgpt-web/discussions/309) for the current
-> ChatGPT message allowances for **GPT-5.6 Sol Pro** and **GPT-6 Astra**. Context limits depend on
-> the account type and selected effort. Plus Medium/High uses a measured 90,000-token window, or
-> up to 270,000 tokens with experimental **3× context** enabled, with native Codex compaction
-> supported throughout.
-
-1. Finish the required setup, open **MCP**, create the Tunnel and regular API key, then press
-   **Connect harness**.
-2. Enable ChatGPT **Developer Mode** and create a new Tunnel connector named exactly
-   **Codex Native2**, with **Authentication: None** and **Allow all actions**.
-3. Run **Verify runtime** to confirm that **Codex Native2** is attached and available.
-
-Write/modify actions also require the ChatGPT workspace and its administrator policy to permit
-them. See
-[developer mode and MCP apps](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt).
-Unexpected approval prompts fail closed unless `--auto-approve-tool-calls` is explicitly enabled;
-that option clicks **Allow once**, never a permanent grant.
-
-## Operations
-
-Use **Activity** for safe local diagnostics and **Settings → Run doctor** for end-to-end health.
-Settings can also cancel a retained browser turn or remove the Codex integration before uninstall.
-Set `CODEX_CHATGPT_WEB_BROWSER_DIAGNOSTICS=1` only when every browser checkpoint needs a screenshot.
-
-New installs use **Compatibility V1** for cross-backend subagents. **Native** preserves Codex's own
-feature settings and enables plaintext Web-to-Web V2 delegation. Restart Codex and start a new task
-after changing the protocol:
-
-```bash
-codex-chatgpt-web subagents status
-codex-chatgpt-web subagents compatibility-v1
-codex-chatgpt-web subagents native
-```
-
-## Limitations and security
-
-- This is unofficial browser automation, not an OpenAI API. ChatGPT UI changes can break selectors;
-  drift fails explicitly instead of silently switching model or transport.
-- Browser state is a sensitive login artifact, and the loopback listener is reachable by processes
-  running as the same local user. Never share the launcher profile; use a trusted workstation.
-- Release packages currently target macOS 13+ (arm64/x64), Windows x64, and Linux x64. Runtime,
-  tests, and packaging are gated on all three in CI; account-bound browser and MCP flows use the
-  separate [release validation](docs/release-validation.md).
-- Builds are not yet platform-signed, so Gatekeeper or SmartScreen may warn. The installers verify
-  the published SHA-256 manifest before installation.
-
-Read the complete [architecture](docs/architecture.md) and
-[security model](docs/security-model.md) before enabling full mode. Report vulnerabilities through
-[SECURITY.md](SECURITY.md).
-
-## Development
-
-```bash
-bun run app
-bun run dev:launcher
-bun run src/cli.ts dev status
-bun run dev:chat compaction-lab "Reply with exactly: DEV READY"
-bun run verify
-bun run smoke:subagents
-bun run app:package
-```
-
-`dev:launcher` starts a second launcher profile under `~/.codex-chatgpt-web-dev`: separate Electron
-state, browser cookies/login, ChatGPT account, configuration, sandboxed `CODEX_HOME`, chats,
-diagnostics, broker, and tunnel profile. It can run beside the normal launcher and never starts a
-Responses daemon or changes Codex. Optional Full setup starts and supervises only its isolated MCP
-tunnel, using the distinct ChatGPT connector name `Codex Native2 DEV`.
-
-`dev:chat` is a named, persistent synthetic outer-Codex harness. It executes the current working
-tree through that isolated launcher browser, Temporary Chat, prompt compiler, Responses parser, and
-compaction handlers. Optional Full setup also exercises the MCP connector and broker; tool effects
-are explicit simulation receipts. Browser-only chats expose no outer tools. It does
-not open a Responses listener, change `openai_base_url`, stop the live daemon, or claim port 17841.
-Run it without a message for `/status`, `/fill 30000`, `/compact`, `/model`, and `/reset` commands.
-Sign in and initialize the profile once inside the window labelled **DEV**. Configure optional Full
-harness only for simulated tool rounds; its launcher keeps the DEV tunnel ready while named chats
-attach their broker on demand. Production credentials and the `Codex Native2` connector are never
-reused implicitly. See
-[DEV chat harness](docs/dev-chat.md).
-
-- [Architecture](docs/architecture.md)
-- [DEV chat harness](docs/dev-chat.md)
-- [Security model](docs/security-model.md)
-- [Troubleshooting](TROUBLESHOOTING.md)
-- [Contributing](CONTRIBUTING.md)
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=miuuyy%2Fcodex-chatgpt-web&type=date&legend=top-left">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=miuuyy/codex-chatgpt-web&type=date&theme=dark&legend=top-left&sealed_token=hBVvg_eOjfMFDrfyeo5FPQkIwcvBEmXc6F7ZoOKnfFE4KPCs67o34w4XwVuM-bHGnKR-SKCAN_TSTWrzuqSBNU-RjNZCLT4f-xNs9qcDhciQtemxHKuuFj0N5YNqZIihdaQfakrh2ANhOrvP0K2LmLXX2zbsYyVaYZknyTnlYeIS_mOGvMcO32ZmPCHK">
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=miuuyy/codex-chatgpt-web&type=date&legend=top-left&sealed_token=hBVvg_eOjfMFDrfyeo5FPQkIwcvBEmXc6F7ZoOKnfFE4KPCs67o34w4XwVuM-bHGnKR-SKCAN_TSTWrzuqSBNU-RjNZCLT4f-xNs9qcDhciQtemxHKuuFj0N5YNqZIihdaQfakrh2ANhOrvP0K2LmLXX2zbsYyVaYZknyTnlYeIS_mOGvMcO32ZmPCHK">
-    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=miuuyy/codex-chatgpt-web&type=date&legend=top-left&sealed_token=hBVvg_eOjfMFDrfyeo5FPQkIwcvBEmXc6F7ZoOKnfFE4KPCs67o34w4XwVuM-bHGnKR-SKCAN_TSTWrzuqSBNU-RjNZCLT4f-xNs9qcDhciQtemxHKuuFj0N5YNqZIihdaQfakrh2ANhOrvP0K2LmLXX2zbsYyVaYZknyTnlYeIS_mOGvMcO32ZmPCHK">
-  </picture>
-</a>
-
-## Disclaimer
-
-This is independent software and is not affiliated with or endorsed by OpenAI. Use it only with
-your own account and in accordance with applicable [Terms of Use](https://openai.com/policies/terms-of-use/)
-and workspace policies; it does not bypass authentication or access controls.
-
-Having trouble? See [Troubleshooting](TROUBLESHOOTING.md) for common problems and their solutions.
+Based on [miuuyy/codex-chatgpt-web](https://github.com/miuuyy/codex-chatgpt-web). Original copyright and third-party notices are preserved. This Windows fork has its own installer identity and update source. Other platforms remain unverified for this fork.
